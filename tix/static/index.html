@@ -102,7 +102,7 @@
       <div id="s-by-project"></div>
     </div>
     <div class="stat-panel">
-      <h3>done — leaderboard (7d / all-time)</h3>
+      <h3>leaderboard (open / done)</h3>
       <div id="s-leaderboard"></div>
     </div>
     <div class="stat-panel">
@@ -354,7 +354,7 @@ async function loadStats() {
   document.getElementById('s-done').textContent = s.done;
   document.getElementById('s-blocked').textContent = s.blocked;
   renderStatRows('s-by-project', s.by_project, r => r.project, r => r.n, false);
-  renderStatRows('s-leaderboard', s.leaderboard, r => r.assignee, r => `${r.done_7d} / ${r.done_all}`, true);
+  renderStatRows('s-leaderboard', s.leaderboard, r => r.assignee, r => `${r.open_all} / ${r.done_all}`, true);
   renderStatRows('s-by-model', s.by_model, r => r.model, r => r.n, false);
 }
 

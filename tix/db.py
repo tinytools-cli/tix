@@ -1,7 +1,7 @@
 import os
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Resolution order: $TIX_DB_PATH override, else a per-user data dir (~/.tix/tix.db) so a
@@ -629,10 +629,11 @@ def mark_inbox_seen(assignee):
 
 
 def dashboard_stats():
-    """Counts and a done-ticket leaderboard for the web dashboard. Leaderboard is
-    keyed off the ticket's current assignee and status='done' -- simple current-state
-    read, not an event-history reconstruction, so a ticket that bounced done -> reopened
-    -> done again is counted once, at its current state, not per transition."""
+    """Counts and a per-assignee leaderboard for the web dashboard. Leaderboard is
+    keyed off each ticket's current status (open vs done) and assignee -- simple
+    current-state read, not an event-history reconstruction, so a ticket that
+    bounced done -> reopened -> done again is counted once, at its current state,
+    not per transition."""
     conn = get_conn()
     status_counts = {r["status"]: r["n"] for r in conn.execute(
         "SELECT status, COUNT(*) AS n FROM tickets GROUP BY status")}
@@ -646,13 +647,12 @@ def dashboard_stats():
         "FROM tickets WHERE status != 'done' GROUP BY project ORDER BY n DESC, project ASC"
     )]
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds")
     leaderboard = [dict(r) for r in conn.execute(
-        "SELECT assignee, COUNT(*) AS done_all, "
-        "SUM(CASE WHEN updated_at >= ? THEN 1 ELSE 0 END) AS done_7d "
-        "FROM tickets WHERE status = 'done' AND assignee != '' "
-        "GROUP BY assignee COLLATE NOCASE ORDER BY done_all DESC, assignee ASC",
-        (cutoff,),
+        "SELECT assignee, "
+        "SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open_all, "
+        "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_all "
+        "FROM tickets WHERE assignee != '' "
+        "GROUP BY assignee COLLATE NOCASE ORDER BY done_all DESC, assignee ASC"
     )]
 
     by_model = [dict(r) for r in conn.execute(

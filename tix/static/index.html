@@ -66,6 +66,9 @@
   .stat-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; flex: 1; min-width: 220px; }
   .stat-panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 500; }
   .stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+  #s-leaderboard .stat-row { cursor: pointer; margin: 0 -8px; padding: 4px 8px; border-radius: 4px; }
+  #s-leaderboard .stat-row:hover { background: #ffffff08; }
+  #s-leaderboard .stat-row.active { background: #5b8cff1a; }
   .stat-row:last-child { border-bottom: none; }
   .stat-row .n { color: var(--muted); }
   .leader-rank { color: var(--muted); margin-right: 6px; }
@@ -86,6 +89,7 @@
   <select id="f-type"><option value="">type: any</option></select>
   <select id="f-priority"><option value="">priority: any</option></select>
   <select id="f-model"><option value="">model: any</option></select>
+  <select id="f-assignee"><option value="">assignee: any</option></select>
   <button class="primary" id="new-btn">+ new</button>
 </header>
 
@@ -276,6 +280,7 @@ async function refresh() {
   const type = document.getElementById('f-type').value;
   const priority = document.getElementById('f-priority').value;
   const model = document.getElementById('f-model').value;
+  const assignee = document.getElementById('f-assignee').value;
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (project) params.set('project', project);
@@ -284,6 +289,7 @@ async function refresh() {
   if (type) params.set('type', type);
   if (priority) params.set('priority', priority);
   if (model) params.set('model', model);
+  if (assignee) params.set('assignee', assignee);
   const unresolved = status === 'unresolved';
   if (unresolved) params.delete('status');
   let rows = await api('/api/tickets?' + params.toString());
@@ -356,6 +362,24 @@ async function loadStats() {
   renderStatRows('s-by-project', s.by_project, r => r.project, r => r.n, false);
   renderStatRows('s-leaderboard', s.leaderboard, r => r.assignee, r => `${r.open_all} / ${r.done_all}`, true);
   renderStatRows('s-by-model', s.by_model, r => r.model, r => r.n, false);
+  fillFilterPreserving('f-assignee', s.leaderboard.map(r => r.assignee), 'assignee: any');
+  wireLeaderboardClicks(s.leaderboard);
+}
+
+function wireLeaderboardClicks(rows) {
+  const el = document.getElementById('s-leaderboard');
+  const current = document.getElementById('f-assignee').value;
+  [...el.children].forEach((row, i) => {
+    const name = rows[i] && rows[i].assignee;
+    if (!name) return;
+    row.classList.toggle('active', name === current);
+    row.addEventListener('click', () => {
+      const sel = document.getElementById('f-assignee');
+      sel.value = (sel.value === name) ? '' : name;
+      refresh();
+      loadStats();
+    });
+  });
 }
 
 function renderStatRows(id, rows, labelFn, valueFn, ranked) {

@@ -150,16 +150,39 @@ def add(title, type_, desc, status, priority, parent, blocked_by, project, team,
 @click.option("--team", default=None)
 @click.option("--assignee", default=None)
 @click.option("--model", default=None)
-def list_cmd(status, type_, priority, parent, blocked_by, project, team, assignee, model):
+@click.option("--tree", is_flag=True, help="nest children under their parent (indented). A child whose parent is filtered out of this listing shows at top level.")
+@click.option("--open", "open_", is_flag=True, help="only open tickets (everything but done). Shortcut for the common view; ignored if --status is given.")
+def list_cmd(status, type_, priority, parent, blocked_by, project, team, assignee, model, tree, open_):
     """List tickets, optionally filtered."""
     parent_id = resolve_tid(parent) if parent else None
     blocked_by_id = resolve_tid(blocked_by) if blocked_by else None
     rows = tixdb.list_tickets(status, type_, priority, parent_id, project, team, assignee, model, blocked_by_id)
+    if open_ and not status:
+        rows = [t for t in rows if t["status"] != "done"]
     if not rows:
         click.echo("no tickets")
         return
+    if not tree:
+        for t in rows:
+            click.echo(fmt_row(t))
+        return
+    in_listing = {t["id"] for t in rows}
+    children: dict = {}
+    roots = []
     for t in rows:
-        click.echo(fmt_row(t))
+        if t["parent_id"] in in_listing:
+            children.setdefault(t["parent_id"], []).append(t)
+        else:
+            roots.append(t)
+
+    def emit(t, depth):
+        indent = "    " * (depth - 1) + "  └─ " if depth else ""
+        click.echo(indent + fmt_row(t))
+        for c in children.get(t["id"], []):
+            emit(c, depth + 1)
+
+    for r in roots:
+        emit(r, 0)
 
 
 @cli.group()

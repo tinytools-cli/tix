@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tix"
+version = "0.1.0"
+description = "A minimal, agent-native ticket tracker — CLI-first, SQLite-backed, with an optional web UI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "click>=8.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.30",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+tix = "tix.cli:cli"
+tix-web = "tix.web:main"
+
+[tool.setuptools]
+packages = ["tix"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+tix = ["static/*"]

@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tix</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #2a2f3a; --text: #e6e8ec; --muted: #8b93a3;
+    --accent: #5b8cff; --red: #ff6b6b; --yellow: #f5c451; --green: #4fd18b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; margin-right: 8px; }
+  input, select, textarea, button { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font: inherit; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  #search { flex: 1; min-width: 160px; }
+  main { padding: 16px 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:hover { background: #ffffff08; cursor: pointer; }
+  tr.row-blocked { box-shadow: inset 3px 0 0 var(--red); }
+  .blocked-marker { color: var(--red); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .status-todo { background: #ffffff1a; color: var(--muted); }
+  .status-in_progress { background: #5b8cff2a; color: var(--accent); }
+  .status-blocked { background: #ff6b6b2a; color: var(--red); }
+  .status-done { background: #4fd18b2a; color: var(--green); }
+  .prio-urgent { color: var(--red); font-weight: 600; }
+  .prio-high { color: var(--yellow); }
+  .prio-med { color: var(--text); }
+  .prio-low { color: var(--muted); }
+  .modal-bg { position: fixed; inset: 0; background: #000a; display: none; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 100%; max-width: 520px; }
+  .modal h2 { margin-top: 0; font-size: 15px; }
+  .field { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input, .field select, .field textarea { width: 100%; }
+  .row { display: flex; gap: 10px; }
+  .row .field { flex: 1; }
+  .modal-actions { display: flex; justify-content: space-between; margin-top: 16px; }
+  .modal-actions .right { display: flex; gap: 8px; }
+  #empty { color: var(--muted); padding: 20px 0; }
+  .tag { color: var(--muted); font-size: 12px; }
+  #notes-section { margin-bottom: 14px; }
+  #notes-list { max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .note { font-size: 13px; border-left: 2px solid var(--border); padding: 4px 8px; }
+  .note .meta { color: var(--muted); font-size: 11px; }
+  .note-empty { color: var(--muted); font-size: 12px; padding: 4px 0; }
+  .stats { padding: 16px 20px 0; display: flex; flex-direction: column; gap: 14px; }
+  .stat-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 90px; flex: 1; }
+  .stat-card .n { font-size: 22px; font-weight: 600; }
+  .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stat-card.blocked .n { color: var(--red); }
+  .stat-panels { display: flex; gap: 14px; flex-wrap: wrap; }
+  .stat-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; flex: 1; min-width: 220px; }
+  .stat-panel h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 500; }
+  .stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-row .n { color: var(--muted); }
+  .leader-rank { color: var(--muted); margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>tix</h1>
+  <input id="search" placeholder="search title / description / tags..." />
+  <select id="f-project"><option value="">project: any</option></select>
+  <select id="f-team"><option value="">team: any</option></select>
+  <select id="f-status"><option value="">status: any</option></select>
+  <select id="f-type"><option value="">type: any</option></select>
+  <select id="f-priority"><option value="">priority: any</option></select>
+  <select id="f-model"><option value="">model: any</option></select>
+  <button class="primary" id="new-btn">+ new</button>
+</header>
+
+<section class="stats" id="stats">
+  <div class="stat-cards">
+    <div class="stat-card"><div class="n" id="s-total">–</div><div class="label">total</div></div>
+    <div class="stat-card"><div class="n" id="s-open">–</div><div class="label">open</div></div>
+    <div class="stat-card"><div class="n" id="s-done">–</div><div class="label">done</div></div>
+    <div class="stat-card blocked"><div class="n" id="s-blocked">–</div><div class="label">blocked</div></div>
+  </div>
+  <div class="stat-panels">
+    <div class="stat-panel">
+      <h3>open work by project</h3>
+      <div id="s-by-project"></div>
+    </div>
+    <div class="stat-panel">
+      <h3>done — leaderboard (7d / all-time)</h3>
+      <div id="s-leaderboard"></div>
+    </div>
+    <div class="stat-panel">
+      <h3>model mix</h3>
+      <div id="s-by-model"></div>
+    </div>
+  </div>
+</section>
+
+<main>
+  <table id="tbl">
+    <thead>
+      <tr><th>key</th><th>project</th><th>team</th><th>type</th><th>title</th><th>status</th><th>priority</th><th>assignee</th><th>model</th></tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" style="display:none">no tickets match</div>
+</main>
+
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h2 id="modal-title">ticket</h2>
+    <div class="field"><label>title</label><input id="m-title" /></div>
+    <div class="row">
+      <div class="field">
+        <label>project (required)</label>
+        <select id="m-project"></select>
+      </div>
+      <div class="field">
+        <label>team</label>
+        <select id="m-team"></select>
+      </div>
+    </div>
+    <div id="m-project-new" class="row" style="display:none">
+      <input id="m-project-new-name" placeholder="project name" />
+      <input id="m-project-new-key" placeholder="key (optional)" style="max-width:110px" />
+      <input id="m-project-new-folder" placeholder="/absolute/folder/path" />
+    </div>
+    <div id="m-team-new" class="row" style="display:none">
+      <input id="m-team-new-name" placeholder="team name" style="flex:1" />
+    </div>
+    <div class="row">
+      <div class="field"><label>type</label><select id="m-type"></select></div>
+      <div class="field"><label>status</label><select id="m-status"></select></div>
+      <div class="field"><label>priority</label><select id="m-priority"></select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>assignee</label><input id="m-assignee" placeholder="e.g. Alice" /></div>
+      <div class="field">
+        <label>model (required)</label>
+        <select id="m-model">
+          <option value="haiku">haiku</option>
+          <option value="sonnet">sonnet</option>
+          <option value="opus">opus</option>
+          <option value="__other__">other…</option>
+        </select>
+      </div>
+    </div>
+    <div id="m-model-new" class="field" style="display:none">
+      <input id="m-model-new-value" placeholder="custom model id" />
+    </div>
+    <div class="row">
+      <div class="field"><label>parent (epic key or id)</label><input id="m-parent" placeholder="e.g. NS-1" /></div>
+      <div class="field"><label>blocked by (ticket key or id)</label><input id="m-blocked-by" placeholder="e.g. NS-3" /></div>
+    </div>
+    <div class="field"><label>tags</label><input id="m-tags" placeholder="comma,separated" /></div>
+    <div class="field"><label>description</label><textarea id="m-desc" rows="4"></textarea></div>
+    <div id="notes-section" style="display:none">
+      <label style="font-size:12px; color: var(--muted);">notes</label>
+      <div id="notes-list"></div>
+      <div class="row" style="margin-top:6px;">
+        <input id="m-note-text" placeholder="add a note..." style="flex:1;" />
+        <button id="note-add-btn">add</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <div>
+        <button id="delete-btn" style="display:none; border-color: var(--red); color: var(--red);">delete</button>
+      </div>
+      <div class="right">
+        <button id="cancel-btn">cancel</button>
+        <button class="primary" id="save-btn">save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let META = { types: [], statuses: [], priorities: [] };
+let editingId = null;
+let editingKey = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let msg = await res.text();
+    try { const j = JSON.parse(msg); if (j.detail) msg = j.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function fillSelect(sel, values, includeBlank) {
+  sel.innerHTML = '';
+  if (includeBlank) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = includeBlank;
+    sel.appendChild(o);
+  }
+  for (const v of values) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  }
+}
+
+function fillFilterPreserving(id, values, label) {
+  const sel = document.getElementById(id);
+  const cur = sel.value;
+  fillSelect(sel, values, label);
+  sel.value = cur;
+}
+
+async function loadMeta() {
+  META = await api('/api/meta');
+  fillFilterPreserving('f-project', META.projects, 'project: any');
+  fillFilterPreserving('f-team', META.teams, 'team: any');
+  fillFilterPreserving('f-status', META.statuses, 'status: any');
+  fillFilterPreserving('f-type', META.types, 'type: any');
+  fillFilterPreserving('f-priority', META.priorities, 'priority: any');
+  fillFilterPreserving('f-model', ['haiku', 'sonnet', 'opus'], 'model: any');
+  fillSelect(document.getElementById('m-type'), META.types);
+  fillSelect(document.getElementById('m-status'), META.statuses);
+  fillSelect(document.getElementById('m-priority'), META.priorities);
+  fillPickerWithNew('m-project', META.projects, '+ New project…');
+  fillPickerWithNew('m-team', META.teams, '+ New team…');
+}
+
+function fillPickerWithNew(selectId, values, newLabel) {
+  const sel = document.getElementById(selectId);
+  const cur = sel.value;
+  sel.innerHTML = '';
+  if (!values.length) {
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '-- select --';
+    sel.appendChild(blank);
+  }
+  for (const v of values) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  }
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__'; newOpt.textContent = newLabel;
+  sel.appendChild(newOpt);
+  if (values.includes(cur)) sel.value = cur;
+}
+
+async function refresh() {
+  const q = document.getElementById('search').value.trim();
+  const project = document.getElementById('f-project').value;
+  const team = document.getElementById('f-team').value;
+  const status = document.getElementById('f-status').value;
+  const type = document.getElementById('f-type').value;
+  const priority = document.getElementById('f-priority').value;
+  const model = document.getElementById('f-model').value;
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (project) params.set('project', project);
+  if (team) params.set('team', team);
+  if (status) params.set('status', status);
+  if (type) params.set('type', type);
+  if (priority) params.set('priority', priority);
+  if (model) params.set('model', model);
+  const rows = await api('/api/tickets?' + params.toString());
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
+  for (const t of rows) {
+    const tr = document.createElement('tr');
+    if (t.status === 'blocked') tr.classList.add('row-blocked');
+    tr.innerHTML = `
+      <td>${escapeHtml(t.ticket_key || ('#' + t.id))}</td>
+      <td>${escapeHtml(t.project || '')}</td>
+      <td>${escapeHtml(t.team || '')}</td>
+      <td>${t.type}</td>
+      <td>${escapeHtml(t.title)}${t.parent_id ? ` <span class="tag">^${escapeHtml(t.parent_key || t.parent_id)}</span>` : ''}${t.blocked_by ? ` <span class="tag blocked-marker">⛔${escapeHtml(t.blocked_by_key || t.blocked_by)}</span>` : ''}${t.tags ? ` <span class="tag">[${escapeHtml(t.tags)}]</span>` : ''}</td>
+      <td><span class="badge status-${t.status}">${t.status}</span></td>
+      <td class="prio-${t.priority}">${t.priority}</td>
+      <td class="tag">${escapeHtml(t.assignee || '')}</td>
+      <td class="tag">${escapeHtml(t.model || '')}</td>
+    `;
+    tr.addEventListener('click', () => openModal(t));
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadStats() {
+  const s = await api('/api/stats');
+  document.getElementById('s-total').textContent = s.total;
+  document.getElementById('s-open').textContent = s.open;
+  document.getElementById('s-done').textContent = s.done;
+  document.getElementById('s-blocked').textContent = s.blocked;
+  renderStatRows('s-by-project', s.by_project, r => r.project, r => r.n, false);
+  renderStatRows('s-leaderboard', s.leaderboard, r => r.assignee, r => `${r.done_7d} / ${r.done_all}`, true);
+  renderStatRows('s-by-model', s.by_model, r => r.model, r => r.n, false);
+}
+
+function renderStatRows(id, rows, labelFn, valueFn, ranked) {
+  const el = document.getElementById(id);
+  if (!rows.length) { el.innerHTML = '<div class="tag">none</div>'; return; }
+  el.innerHTML = rows.map((r, i) => `
+    <div class="stat-row"><span>${ranked ? `<span class="leader-rank">${i + 1}.</span>` : ''}${escapeHtml(String(labelFn(r)))}</span><span class="n">${escapeHtml(String(valueFn(r)))}</span></div>
+  `).join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function openModal(t) {
+  editingId = t ? t.id : null;
+  editingKey = t ? (t.ticket_key || `#${t.id}`) : null;
+  document.getElementById('modal-title').textContent = t ? (t.ticket_key || `#${t.id}`) : 'new ticket';
+  document.getElementById('m-title').value = t ? t.title : '';
+
+  setProjectPicker(t ? (t.project || '') : (document.getElementById('f-project').value || ''));
+  setTeamPicker(t ? (t.team || '') : (document.getElementById('f-team').value || ''));
+  setModelPicker(t ? (t.model || '') : '');
+
+  document.getElementById('m-type').value = t ? t.type : 'task';
+  document.getElementById('m-status').value = t ? t.status : 'todo';
+  document.getElementById('m-priority').value = t ? t.priority : 'med';
+  document.getElementById('m-assignee').value = t ? (t.assignee || '') : '';
+  document.getElementById('m-parent').value = t && t.parent_id ? (t.parent_key || t.parent_id) : '';
+  document.getElementById('m-blocked-by').value = t && t.blocked_by ? (t.blocked_by_key || t.blocked_by) : '';
+  document.getElementById('m-tags').value = t ? (t.tags || '') : '';
+  document.getElementById('m-desc').value = t ? (t.description || '') : '';
+  document.getElementById('delete-btn').style.display = t ? 'inline-block' : 'none';
+  document.getElementById('notes-section').style.display = t ? 'block' : 'none';
+  document.getElementById('m-note-text').value = '';
+  document.getElementById('notes-list').innerHTML = '';
+  if (t) loadNotes(t.id);
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function setProjectPicker(value) {
+  const sel = document.getElementById('m-project');
+  const hasOption = Array.from(sel.options).some(o => o.value === value);
+  sel.value = (value && hasOption) ? value : (value ? '__new__' : '');
+  if (sel.value === '__new__' && value) document.getElementById('m-project-new-name').value = value;
+  toggleNewProject();
+}
+
+function setTeamPicker(value) {
+  const sel = document.getElementById('m-team');
+  const hasOption = Array.from(sel.options).some(o => o.value === value);
+  sel.value = (value && hasOption) ? value : (value ? '__new__' : '');
+  if (sel.value === '__new__' && value) document.getElementById('m-team-new-name').value = value;
+  toggleNewTeam();
+}
+
+function setModelPicker(value) {
+  const sel = document.getElementById('m-model');
+  const known = ['haiku', 'sonnet', 'opus'];
+  sel.value = known.includes(value) ? value : (value ? '__other__' : 'sonnet');
+  if (sel.value === '__other__' && value) document.getElementById('m-model-new-value').value = value;
+  toggleNewModel();
+}
+
+function toggleNewProject() {
+  const isNew = document.getElementById('m-project').value === '__new__';
+  document.getElementById('m-project-new').style.display = isNew ? 'flex' : 'none';
+}
+
+function toggleNewTeam() {
+  const isNew = document.getElementById('m-team').value === '__new__';
+  document.getElementById('m-team-new').style.display = isNew ? 'flex' : 'none';
+}
+
+function toggleNewModel() {
+  const isOther = document.getElementById('m-model').value === '__other__';
+  document.getElementById('m-model-new').style.display = isOther ? 'block' : 'none';
+}
+
+async function loadNotes(ticketId) {
+  const notes = await api(`/api/tickets/${ticketId}/notes`);
+  const list = document.getElementById('notes-list');
+  if (!notes.length) {
+    list.innerHTML = '<div class="note-empty">no notes yet</div>';
+    return;
+  }
+  list.innerHTML = notes.map(n => `
+    <div class="note">
+      <div class="meta">${escapeHtml(n.created_at)}${n.author ? ' — ' + escapeHtml(n.author) : ''}</div>
+      <div>${escapeHtml(n.text)}</div>
+    </div>
+  `).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+async function addNote() {
+  const text = document.getElementById('m-note-text').value.trim();
+  if (!text || !editingId) return;
+  await api(`/api/tickets/${editingId}/notes`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  document.getElementById('m-note-text').value = '';
+  loadNotes(editingId);
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+  editingId = null;
+}
+
+async function resolveProjectValue() {
+  const sel = document.getElementById('m-project');
+  if (sel.value !== '__new__') return sel.value;
+  const name = document.getElementById('m-project-new-name').value.trim();
+  const key = document.getElementById('m-project-new-key').value.trim();
+  const folder = document.getElementById('m-project-new-folder').value.trim();
+  if (!name || !folder) throw new Error('new project needs at least a name and a folder');
+  const body = { name, folder };
+  if (key) body.key = key;
+  await api('/api/projects', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+  return name;
+}
+
+async function resolveTeamValue() {
+  const sel = document.getElementById('m-team');
+  if (sel.value !== '__new__') return sel.value;
+  const name = document.getElementById('m-team-new-name').value.trim();
+  if (!name) return '';
+  await api('/api/teams', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) });
+  return name;
+}
+
+function resolveModelValue() {
+  const sel = document.getElementById('m-model');
+  if (sel.value !== '__other__') return sel.value;
+  return document.getElementById('m-model-new-value').value.trim();
+}
+
+async function save() {
+  const title = document.getElementById('m-title').value.trim();
+  if (!title) { alert('title is required'); return; }
+
+  let project, team, model;
+  try {
+    project = await resolveProjectValue();
+    team = await resolveTeamValue();
+    model = resolveModelValue();
+  } catch (err) {
+    alert('Error: ' + (err.message || err));
+    return;
+  }
+
+  if (!editingId) {
+    // only enforced on brand-new tickets — editing a ticket that predates these
+    // fields shouldn't be blocked just because it doesn't have one yet.
+    if (!project) { alert('project is required'); return; }
+    if (!model) { alert('model is required'); return; }
+  }
+
+  const payload = {
+    title,
+    project,
+    team,
+    type: document.getElementById('m-type').value,
+    status: document.getElementById('m-status').value,
+    priority: document.getElementById('m-priority').value,
+    assignee: document.getElementById('m-assignee').value.trim(),
+    model,
+    parent_id: document.getElementById('m-parent').value.trim() || null,
+    blocked_by: document.getElementById('m-blocked-by').value.trim() || null,
+    tags: document.getElementById('m-tags').value.trim(),
+    description: document.getElementById('m-desc').value,
+  };
+  await trySave(payload);
+}
+
+async function trySave(payload) {
+  try {
+    if (editingId) {
+      await api(`/api/tickets/${editingId}`, { method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+    } else {
+      await api('/api/tickets', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+    }
+  } catch (err) {
+    const msg = err.message || String(err);
+    const projMatch = msg.match(/no such project '([^']+)'/);
+    const teamMatch = msg.match(/no such team '([^']+)'/);
+    if (projMatch) {
+      const folder = prompt(`Project "${projMatch[1]}" isn't registered yet. Absolute folder path for its context/files (created if missing):`);
+      if (folder) {
+        await api('/api/projects', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name: projMatch[1], folder }) });
+        return trySave(payload);
+      }
+    }
+    if (teamMatch && confirm(`Team "${teamMatch[1]}" isn't registered yet. Register it and continue?`)) {
+      await api('/api/teams', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name: teamMatch[1] }) });
+      return trySave(payload);
+    }
+    alert('Error: ' + msg);
+    return;
+  }
+  closeModal();
+  await loadMeta();
+  refresh();
+  loadStats();
+}
+
+async function del() {
+  if (!editingId) return;
+  if (!confirm(`delete ${editingKey}?`)) return;
+  await api(`/api/tickets/${editingId}`, { method: 'DELETE' });
+  closeModal();
+  refresh();
+  loadStats();
+}
+
+document.getElementById('new-btn').addEventListener('click', () => openModal(null));
+document.getElementById('cancel-btn').addEventListener('click', closeModal);
+document.getElementById('save-btn').addEventListener('click', save);
+document.getElementById('delete-btn').addEventListener('click', del);
+document.getElementById('note-add-btn').addEventListener('click', addNote);
+document.getElementById('m-project').addEventListener('change', toggleNewProject);
+document.getElementById('m-team').addEventListener('change', toggleNewTeam);
+document.getElementById('m-model').addEventListener('change', toggleNewModel);
+document.getElementById('m-note-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addNote(); } });
+document.getElementById('modal-bg').addEventListener('click', (e) => { if (e.target.id === 'modal-bg') closeModal(); });
+document.getElementById('search').addEventListener('input', debounce(refresh, 250));
+document.getElementById('f-project').addEventListener('change', refresh);
+document.getElementById('f-team').addEventListener('change', refresh);
+document.getElementById('f-status').addEventListener('change', refresh);
+document.getElementById('f-type').addEventListener('change', refresh);
+document.getElementById('f-priority').addEventListener('change', refresh);
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+loadMeta().then(refresh);
+loadStats();
+</script>
+</body>
+</html>

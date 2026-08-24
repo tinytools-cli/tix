@@ -209,7 +209,7 @@ def add_project(name, folder="", key=None):
             "folder is required — where does this project's context/files/downloads live? "
             "An absolute path, e.g. /home/you/Projects/my-project. Doesn't need to be a "
             "codebase; every project gets one, even non-code initiatives. Created if it "
-            "doesn't exist yet."
+            "for now this just reserves the location.)"
         )
     if not os.path.isabs(folder):
         raise TixError(f"folder must be an absolute path, got '{folder}'")

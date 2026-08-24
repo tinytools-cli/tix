@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+import json
 import os
+import re
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
 
@@ -70,17 +74,18 @@ def cli(ctx):
 
     Then reference either by name or key everywhere else.
 
-    Scale, roughly — get the ticket at the right altitude before you create it:
+    Scale, roughly  — get the ticket at the right
+    altitude before you create it:
 
-      project = multi-month or permanent initiative (e.g. a major product, tix itself)
+      project = multi-month or permanent initiative (e.g. North Star, tix itself)
       epic    = weeks to a month of work — the biggest thing that goes IN a project
       story/task/bug/support = an hour to a couple of days
 
     If something will take more than a couple of days, it's not a task — make it an epic
     and break it into tasks under it (--parent).
 
-    Every ticket also requires --model. Recommended convention: choose the model to fit the
-    task, to minimize cost AND maximize fit — decide BEFORE you start,
+    Every ticket also requires --model. Recommended convention: choose
+    the model to fit the task, to minimize cost AND maximize fit — decide BEFORE you start,
     don't inherit a default. This field is where that judgement gets declared, not paperwork
     after the fact.
 
@@ -98,7 +103,7 @@ def cli(ctx):
     models by complexity, split it into separate tickets rather than picking one model for
     the whole thing.
 
-    A ticket is history, not a current-state doc. It records a decision and
+    A ticket is history, not a current-state doc  It records a decision and
     what it cost — why X was set to Y, on what date, what dead ends came first. Don't edit a
     closed ticket to keep it "current" as reality moves on; that destroys the record and gives
     you no way to tell which of several edits is the live answer. What's true RIGHT NOW belongs
@@ -177,7 +182,9 @@ def project():
 @click.option("--key", default=None, help="2-letter code for ticket numbers, e.g. NS. Auto-derived if omitted.")
 @click.option("--folder", required=True,
               help="required — absolute path where this project's context/files/downloads live. "
-                   "Created if missing. Not just for codebases — every project gets one.")
+                   "Created if missing. Not just for codebases — every project gets one. "
+                   "Standard structure inside it is still being defined (IS-13); for now this "
+                   "just reserves the location.")
 def project_add(name, key, folder):
     row = die_on_tix_error(tixdb.add_project, name, folder, key)
     click.echo(f"registered project '{row['name']}' — key {row['key']} (tickets will be {row['key']}-1, {row['key']}-2, ...), folder {row.get('folder', folder)}")
@@ -267,8 +274,8 @@ def note():
 @click.option("--created-at", default=None, help="backdate the note's timestamp (ISO date or datetime, e.g. 2026-08-15) — for importing history, not normal use")
 def note_add(tid, text, author, created_at):
     """Add a note. This is how you FINISH a ticket — a status flip alone tells the next
-    reader nothing. Before `tix update <KEY> --status done`, always `tix note add <KEY>
-    "..."` covering, in order:
+    reader nothing (). Before `tix update
+    <KEY> --status done`, always `tix note add <KEY> "..."` covering, in order:
 
     \b
     1. What you actually did — not just what the ticket asked for.
@@ -424,6 +431,135 @@ def inbox(assignee):
         else:
             click.echo(f"[{it['ts']}] {it['ticket_key']:<8} note{who_did}: {it['text']}")
     tixdb.mark_inbox_seen(who)
+
+
+# Generic "did real work happen" heuristics, in case no role-conf is given or
+# readable. Shell-command oriented so they work against either transcript format.
+DEFAULT_WORK_PATTERNS = [
+    r"\bgit\s+(commit|push|merge|reset|checkout)\b",
+    r"\bsystemctl\s+(?!.*(status|is-active|list|show|cat))",
+    r"\bdocker\s+(run|rm|stop|start|restart|exec|build|compose)\b",
+    r"\bapt(-get)?\s+(install|remove|purge)\b",
+    r"\b(rm|mv|chmod|chown|tee|crontab)\s",
+]
+# Claude Code transcripts also record Edit/Write tool calls as structured JSON,
+# not shell commands -- only relevant for that one transcript format.
+CLAUDE_CODE_EXTRA_PATTERNS = [r'"name":"(Edit|Write)"']
+TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z])tix\s+(add|update|note)(\s|"|$)'
+
+
+def _guard_checkpoint_path(session):
+    if not session:
+        return None
+    d = Path.home() / ".tix" / "guard-checkpoints"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / f"{session}.offset")
+
+
+def _guard_load_patterns(conf_path, fmt):
+    """A role-conf, when given, is the FULL authority on what counts as work for that
+    role -- it replaces the generic defaults rather than adding to them, so a role that
+    doesn't care about file edits (e.g. one that only sends email) can say so. The
+    Claude-Code-specific Edit/Write signal is folded into the generic defaults for the
+    same reason: it only applies when nothing more specific has been declared."""
+    if conf_path:
+        try:
+            lines = Path(conf_path).read_text().splitlines()
+            custom = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+            if custom:
+                return custom
+        except Exception:
+            pass
+    patterns = list(DEFAULT_WORK_PATTERNS)
+    if fmt == "claude-code":
+        patterns = patterns + CLAUDE_CODE_EXTRA_PATTERNS
+    return patterns
+
+
+def _guard_check_impl(transcript, fmt, conf, checkpoint, session):
+    ckpt_path = checkpoint or _guard_checkpoint_path(session)
+    offset = 0
+    if ckpt_path and os.path.exists(ckpt_path):
+        try:
+            offset = int((Path(ckpt_path).read_text() or "0").strip())
+        except Exception:
+            offset = 0
+
+    if fmt == "claude-code":
+        if not transcript or not os.path.exists(transcript):
+            return {"decision": "allow", "reason": None}
+        raw = Path(transcript).read_text(errors="ignore")
+    else:
+        raw = sys.stdin.read()
+
+    if offset > len(raw):
+        offset = 0
+    window, new_offset = raw[offset:], len(raw)
+
+    def mark_seen():
+        if ckpt_path:
+            try:
+                Path(ckpt_path).write_text(str(new_offset))
+            except Exception:
+                pass
+
+    patterns = _guard_load_patterns(conf, fmt)
+    did_work = any(re.search(p, window) for p in patterns)
+    if not did_work:
+        mark_seen()
+        return {"decision": "allow", "reason": None}
+
+    if re.search(TIX_ACTIVITY_PATTERN, window):
+        mark_seen()
+        return {"decision": "allow", "reason": None}
+
+    return {
+        "decision": "block",
+        "reason": (
+            "Real work happened without any tix activity (no 'tix add' / 'tix update' / "
+            "'tix note' run) since the last check. File it if this was a real unit of work, "
+            "or proceed if it genuinely didn't need one -- this checks the window since the "
+            "last time it allowed a turn through, not the whole session, so it won't "
+            "re-flag the same thing forever once you've either filed it or moved past it."
+        ),
+    }
+
+
+@cli.group()
+def guard():
+    """Enforcement primitives for wiring tix into an agent harness as a hard gate,
+    not just a written convention. `guard check` is harness-agnostic on purpose --
+    see docs/ENFORCEMENT.md for how to wire it into your own harness's hook or
+    callback mechanism (a Claude Code Stop-hook adapter is included as a worked
+    example)."""
+
+
+@guard.command("check")
+@click.option("--transcript", default=None, help="path to a transcript file. Required when --format is claude-code.")
+@click.option("--format", "fmt", default="claude-code", type=click.Choice(["claude-code", "lines"]),
+              help="'claude-code' parses a Claude Code session transcript (JSONL) at --transcript. "
+                   "'lines' reads plain text from stdin instead -- one action/command per line, for "
+                   "any other harness's adapter to produce however it logs its own actions.")
+@click.option("--conf", default=None, help="path to a role-conf file, one regex per line ('#' comments allowed). "
+                                            "Falls back to built-in generic defaults if omitted or unreadable.")
+@click.option("--checkpoint", default=None, help="checkpoint file path, tracking what's already been reviewed so "
+                                                   "the same work isn't re-flagged forever. Auto-derived from "
+                                                   "--session under ~/.tix/guard-checkpoints/ if omitted.")
+@click.option("--session", default=None, help="session identifier -- only used to derive a default --checkpoint path.")
+def guard_check(transcript, fmt, conf, checkpoint, session):
+    """Decide whether real work happened (per the active role-conf, or generic
+    defaults) without any tix activity since the last check for this session.
+
+    Prints {"decision": "allow"|"block", "reason": ...} as JSON on stdout and
+    always exits 0 -- callers read the JSON, not the exit code, so a caller that
+    mishandles this can't get stuck. This command doesn't know or care what's
+    calling it or what happens on a block -- that's your harness adapter's job."""
+    try:
+        result = _guard_check_impl(transcript, fmt, conf, checkpoint, session)
+    except Exception:
+        # Fails open: a broken guard must never be able to wedge a session.
+        result = {"decision": "allow", "reason": None}
+    click.echo(json.dumps(result))
 
 
 if __name__ == "__main__":

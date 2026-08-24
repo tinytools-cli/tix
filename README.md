@@ -106,6 +106,10 @@ a ticket before starting work, leave a real note before closing one — takes pu
 expectation in front of them, not just having the tool available. [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md)
 is a paste-ready instructions block for your agents' own system prompt/CLAUDE.md/AGENTS.md.
 
+Instructions are advice — an agent can still just not follow them. `tix guard check` plus a
+harness adapter turns that into a hard gate: a turn that did real work with zero tix activity
+doesn't get to end quietly. See [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md).
+
 ## Design notes
 
 **A ticket is history, not a current-state doc.** It records a decision and what it cost — why

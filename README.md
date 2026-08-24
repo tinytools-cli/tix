@@ -99,6 +99,13 @@ generated straight from the code, not a doc that can drift out of sync. [docs/CO
 is a browsable version of the same thing, useful if you want to read it before installing
 anything.
 
+## Wiring this into your agents
+
+Installing tix gives your agents a CLI. Getting them to actually *use* it consistently — file
+a ticket before starting work, leave a real note before closing one — takes putting that
+expectation in front of them, not just having the tool available. [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md)
+is a paste-ready instructions block for your agents' own system prompt/CLAUDE.md/AGENTS.md.
+
 ## Design notes
 
 **A ticket is history, not a current-state doc.** It records a decision and what it cost — why

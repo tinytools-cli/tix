@@ -64,19 +64,40 @@ own name:
 export TIX_AGENT=alice
 ```
 
-With that set:
-- `--by`/`--author` default to it, so you don't have to pass `--by alice` on every command.
-- `tix inbox` shows you what changed on your tickets (or where you were `@mentioned` in a note)
-  since you last checked — reading it marks it seen, doesn't delete anything.
-- Every other command prints a one-line nudge to stderr when your inbox is non-empty, so you
-  find out without having to remember to check.
+With that set, `--by`/`--author` default to it, so you don't have to pass `--by alice` on every
+`add`/`update`/`note add`.
+
+### `tix inbox` — what changed since you last looked
+
+```
+tix inbox            # defaults to $TIX_AGENT
+tix inbox alice       # or name someone explicitly
+```
+
+Shows two kinds of things, both authored by someone other than you, since the last time you ran
+`tix inbox` (reading it marks it seen — it doesn't delete anything, the ticket's own history is
+untouched):
+
+- **Field changes and notes on tickets assigned to you.**
+- **Any note anywhere that `@mentions` you by name** — `tix note add NS-3 "@alice can you take a
+  look at this"` — even on a ticket assigned to someone else. This is how you flag someone
+  without reassigning the ticket to them.
+
+Mentions only work in **notes**, not ticket descriptions — descriptions are a static current-state
+summary, a mention there would just go stale. The match is a whole-word `@name`, case-insensitive,
+with a word boundary on both sides, so `@alice` matches but doesn't false-fire on `@alicebot` or
+vice versa. A note that mentions yourself doesn't add itself to your own inbox.
+
+Every other `tix` command prints one line to stderr — `N ticket(s) changed — tix inbox` — when
+your inbox is non-empty, silent otherwise. That's the whole notification mechanism: no polling,
+no push, no daemon. It just rides on commands you're already running.
 
 ## Full command reference
 
-Run `tix --help` or `tix <command> --help` — it's the actual spec, kept in sync with the code,
-not a separate doc that drifts. Commands: `add`, `list`, `show`, `update`, `rm`, `search`,
-`activity`, `inbox`, `note add`/`note list`, `project add`/`list`/`rename`, `projects`,
-`team add`/`list`, `teams`.
+Run `tix --help` or `tix <command> --help` for the authoritative, always-current spec — it's
+generated straight from the code, not a doc that can drift out of sync. [docs/COMMANDS.md](docs/COMMANDS.md)
+is a browsable version of the same thing, useful if you want to read it before installing
+anything.
 
 ## Design notes
 

@@ -64,6 +64,10 @@
   .stat-row:last-child { border-bottom: none; }
   .stat-row .n { color: var(--muted); }
   .leader-rank { color: var(--muted); margin-right: 6px; }
+.caret { cursor: pointer; user-select: none; display: inline-block; width: 1em; color: var(--accent, #7aa2f7); font-weight: bold; }
+.caret-spacer { display: inline-block; width: 1em; }
+.tree-indent { color: #666; }
+.row-child td:first-child { opacity: .75; }
 </style>
 </head>
 <body>
@@ -73,7 +77,7 @@
   <input id="search" placeholder="search title / description / tags..." />
   <select id="f-project"><option value="">project: any</option></select>
   <select id="f-team"><option value="">team: any</option></select>
-  <select id="f-status"><option value="">status: any</option></select>
+  <select id="f-status"><option value="unresolved" selected>status: unresolved</option><option value="">status: any</option></select>
   <select id="f-type"><option value="">type: any</option></select>
   <select id="f-priority"><option value="">priority: any</option></select>
   <select id="f-model"><option value="">model: any</option></select>
@@ -210,10 +214,17 @@ function fillSelect(sel, values, includeBlank) {
   }
 }
 
-function fillFilterPreserving(id, values, label) {
+function fillFilterPreserving(id, values, label, extra) {
   const sel = document.getElementById(id);
   const cur = sel.value;
   fillSelect(sel, values, label);
+  if (extra) {
+    // A synthetic option (e.g. status: unresolved) inserted before the "any"
+    // placeholder; it is not a real value the API knows.
+    const opt = document.createElement('option');
+    opt.value = extra.value; opt.textContent = extra.label;
+    sel.insertBefore(opt, sel.firstChild);
+  }
   sel.value = cur;
 }
 
@@ -221,7 +232,7 @@ async function loadMeta() {
   META = await api('/api/meta');
   fillFilterPreserving('f-project', META.projects, 'project: any');
   fillFilterPreserving('f-team', META.teams, 'team: any');
-  fillFilterPreserving('f-status', META.statuses, 'status: any');
+  fillFilterPreserving('f-status', META.statuses, 'status: any', {value: 'unresolved', label: 'status: unresolved'});
   fillFilterPreserving('f-type', META.types, 'type: any');
   fillFilterPreserving('f-priority', META.priorities, 'priority: any');
   fillFilterPreserving('f-model', ['haiku', 'sonnet', 'opus'], 'model: any');
@@ -268,27 +279,67 @@ async function refresh() {
   if (type) params.set('type', type);
   if (priority) params.set('priority', priority);
   if (model) params.set('model', model);
-  const rows = await api('/api/tickets?' + params.toString());
+  const unresolved = status === 'unresolved';
+  if (unresolved) params.delete('status');
+  let rows = await api('/api/tickets?' + params.toString());
+  if (unresolved) rows = rows.filter(t => t.status !== 'done');
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
+
+  // Tree order: children nest (collapsible) under their parent when the parent
+  // is in the current listing; otherwise they show at top level.
+  const inListing = new Set(rows.map(t => t.id));
+  const children = new Map();
+  const roots = [];
   for (const t of rows) {
+    if (t.parent_id && inListing.has(t.parent_id)) {
+      if (!children.has(t.parent_id)) children.set(t.parent_id, []);
+      children.get(t.parent_id).push(t);
+    } else {
+      roots.push(t);
+    }
+  }
+  let collapsed;
+  try { collapsed = new Set(JSON.parse(localStorage.getItem('tix-collapsed') || '[]')); }
+  catch (e) { collapsed = new Set(); }
+
+  function renderRow(t, depth) {
+    const kids = children.get(t.id) || [];
+    const isCollapsed = collapsed.has(t.ticket_key || t.id);
     const tr = document.createElement('tr');
     if (t.status === 'blocked') tr.classList.add('row-blocked');
+    if (depth) tr.classList.add('row-child');
+    const caret = kids.length
+      ? `<span class="caret" title="${kids.length} children">${isCollapsed ? '▸' : '▾'}</span> `
+      : (depth ? '' : '<span class="caret-spacer"></span> ');
+    const indent = depth ? '<span class="tree-indent">' + '&nbsp;&nbsp;&nbsp;&nbsp;'.repeat(depth - 1) + '└─&nbsp;</span>' : '';
     tr.innerHTML = `
       <td>${escapeHtml(t.ticket_key || ('#' + t.id))}</td>
       <td>${escapeHtml(t.project || '')}</td>
       <td>${escapeHtml(t.team || '')}</td>
       <td>${t.type}</td>
-      <td>${escapeHtml(t.title)}${t.parent_id ? ` <span class="tag">^${escapeHtml(t.parent_key || t.parent_id)}</span>` : ''}${t.blocked_by ? ` <span class="tag blocked-marker">⛔${escapeHtml(t.blocked_by_key || t.blocked_by)}</span>` : ''}${t.tags ? ` <span class="tag">[${escapeHtml(t.tags)}]</span>` : ''}</td>
+      <td>${indent}${caret}${escapeHtml(t.title)}${(t.parent_id && !depth) ? ` <span class="tag">^${escapeHtml(t.parent_key || t.parent_id)}</span>` : ''}${t.blocked_by ? ` <span class="tag blocked-marker">⛔${escapeHtml(t.blocked_by_key || t.blocked_by)}</span>` : ''}${t.tags ? ` <span class="tag">[${escapeHtml(t.tags)}]</span>` : ''}</td>
       <td><span class="badge status-${t.status}">${t.status}</span></td>
       <td class="prio-${t.priority}">${t.priority}</td>
       <td class="tag">${escapeHtml(t.assignee || '')}</td>
       <td class="tag">${escapeHtml(t.model || '')}</td>
     `;
+    const caretEl = tr.querySelector('.caret');
+    if (caretEl && kids.length) {
+      caretEl.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const key = t.ticket_key || t.id;
+        if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+        try { localStorage.setItem('tix-collapsed', JSON.stringify([...collapsed])); } catch (e) {}
+        refresh();
+      });
+    }
     tr.addEventListener('click', () => openModal(t));
     tbody.appendChild(tr);
+    if (!isCollapsed) for (const c of kids) renderRow(c, depth + 1);
   }
+  for (const r of roots) renderRow(r, 0);
 }
 
 async function loadStats() {
@@ -541,6 +592,7 @@ function debounce(fn, ms) {
 
 loadMeta().then(refresh);
 loadStats();
+
 </script>
 </body>
 </html>

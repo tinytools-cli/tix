@@ -54,7 +54,9 @@
   .note-empty { color: var(--muted); font-size: 12px; padding: 4px 0; }
   .stats { padding: 16px 20px 0; display: flex; flex-direction: column; gap: 14px; }
   .stat-cards { display: flex; gap: 10px; flex-wrap: wrap; }
-  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 90px; flex: 1; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 90px; flex: 1; cursor: pointer; }
+  .stat-card:hover { border-color: var(--accent); }
+  .stat-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .stat-card .n { font-size: 22px; font-weight: 600; }
   .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .stat-card.blocked .n { color: var(--red); }
@@ -87,10 +89,10 @@
 
 <section class="stats" id="stats">
   <div class="stat-cards">
-    <div class="stat-card"><div class="n" id="s-total">–</div><div class="label">total</div></div>
-    <div class="stat-card"><div class="n" id="s-open">–</div><div class="label">open</div></div>
-    <div class="stat-card"><div class="n" id="s-done">–</div><div class="label">done</div></div>
-    <div class="stat-card blocked"><div class="n" id="s-blocked">–</div><div class="label">blocked</div></div>
+    <div class="stat-card" id="card-total" data-status=""><div class="n" id="s-total">–</div><div class="label">total</div></div>
+    <div class="stat-card" id="card-open" data-status="unresolved"><div class="n" id="s-open">–</div><div class="label">open</div></div>
+    <div class="stat-card" id="card-done" data-status="done"><div class="n" id="s-done">–</div><div class="label">done</div></div>
+    <div class="stat-card blocked" id="card-blocked" data-status="blocked"><div class="n" id="s-blocked">–</div><div class="label">blocked</div></div>
   </div>
   <div class="stat-panels">
     <div class="stat-panel">
@@ -586,6 +588,22 @@ document.getElementById('f-status').addEventListener('change', refresh);
 document.getElementById('f-type').addEventListener('change', refresh);
 document.getElementById('f-priority').addEventListener('change', refresh);
 
+for (const card of document.querySelectorAll('.stat-card[data-status]')) {
+  card.addEventListener('click', () => {
+    document.getElementById('f-status').value = card.dataset.status;
+    updateActiveCard();
+    refresh();
+  });
+}
+
+function updateActiveCard() {
+  const status = document.getElementById('f-status').value;
+  for (const card of document.querySelectorAll('.stat-card[data-status]')) {
+    card.classList.toggle('active', card.dataset.status === status);
+  }
+}
+document.getElementById('f-status').addEventListener('change', updateActiveCard);
+
 function debounce(fn, ms) {
   let t;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
@@ -593,6 +611,7 @@ function debounce(fn, ms) {
 
 loadMeta().then(refresh);
 loadStats();
+updateActiveCard();
 
 </script>
 </body>

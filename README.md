@@ -29,6 +29,18 @@ pip install -e .
 Data lives in `~/.tix/tix.db` (SQLite) by default. Override with `TIX_DB_PATH=/some/path.db`
 if you want it somewhere else, or colocated with a specific project's own data.
 
+### Installing from a script / CI
+
+Two things that only show up when you're scripting the install rather than doing it by hand:
+
+- **Install the package, don't path-hack a clone.** `pip install git+https://github.com/tix-cli/tix`
+  is the right way to pull it into an automated install. Don't clone the repo and try to run
+  `$repo/tix` directly as if it were a script — `tix/` is the actual Python package directory in
+  the published repo, so that path is a directory, not an executable, and fails with "Is a
+  directory". Verify the install by running `tix --help`, not by checking that a path resolves.
+- **Ubuntu 24.04+ (PEP 668) refuses `pip install --user`** with an "externally-managed-environment"
+  error. Use a venv instead — don't reach for `--break-system-packages`, that's the wrong fix.
+
 ## Quickstart
 
 Register a project and a ticket:

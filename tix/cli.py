@@ -313,6 +313,9 @@ def note_add(tid, text, author, created_at):
     partial is worse than no note, because it's trusted."""
     real_id = resolve_tid(tid)
     author = resolve_by(author)
+    if not author:
+        click.echo("--author is required (or set $TIX_AGENT) -- a note with no author is unreadable history", err=True)
+        raise SystemExit(1)
     created_at = parse_created_at(created_at)
     die_on_tix_error(tixdb.add_note, real_id, text, author, created_at)
     click.echo("note added")

@@ -41,6 +41,12 @@
   .field { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
   .field label { font-size: 12px; color: var(--muted); }
   .field input, .field select, .field textarea { width: 100%; }
+  .template-menu { position: absolute; z-index: 5; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px #0008; }
+  .template-menu-item { padding: 8px 12px; cursor: pointer; font-size: 13px; }
+  .template-menu-item:hover, .template-menu-item.sel { background: var(--accent); color: white; }
+  .template-menu-item .tmi-type { font-weight: 600; text-transform: capitalize; }
+  .template-menu-item .tmi-hint { color: var(--muted); font-size: 11px; }
+  .template-menu-item:hover .tmi-hint, .template-menu-item.sel .tmi-hint { color: #ffffffcc; }
   .row { display: flex; gap: 10px; }
   .row .field { flex: 1; }
   .modal-actions { display: flex; justify-content: space-between; margin-top: 16px; }
@@ -57,8 +63,6 @@
   .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 90px; flex: 1; cursor: pointer; }
   .stat-card:hover { border-color: var(--accent); }
   .stat-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .epic-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #a970ff; margin-right: 6px; vertical-align: middle; }
-  .bug-icon { display: inline-block; width: 6px; height: 6px; background: var(--red); margin-right: 6px; vertical-align: middle; transform: rotate(45deg); }
   .stat-card .n { font-size: 22px; font-weight: 600; }
   .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .stat-card.blocked .n { color: var(--red); }
@@ -75,6 +79,8 @@
 .caret { cursor: pointer; user-select: none; display: inline-block; width: 1em; color: var(--accent, #7aa2f7); font-weight: bold; }
 .caret-spacer { display: inline-block; width: 1em; }
 .tree-indent { color: #666; }
+.epic-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #a970ff; margin-right: 6px; vertical-align: middle; }
+.bug-icon { display: inline-block; width: 6px; height: 6px; background: var(--red); margin-right: 6px; vertical-align: middle; transform: rotate(45deg); }
 .row-child td:first-child { opacity: .75; }
 </style>
 </head>
@@ -173,13 +179,18 @@
       <div class="field"><label>blocked by (ticket key or id)</label><input id="m-blocked-by" placeholder="e.g. NS-3" /></div>
     </div>
     <div class="field"><label>tags</label><input id="m-tags" placeholder="comma,separated" /></div>
-    <div class="field"><label>description</label><textarea id="m-desc" rows="4"></textarea></div>
+    <div class="field" style="position:relative;">
+      <label>description <span class="tag">(type / for a template)</span></label>
+      <textarea id="m-desc" rows="4"></textarea>
+      <div id="desc-template-menu" class="template-menu" style="display:none;"></div>
+    </div>
     <div id="notes-section" style="display:none">
       <label style="font-size:12px; color: var(--muted);">notes</label>
       <div id="notes-list"></div>
-      <div class="row" style="margin-top:6px;">
-        <input id="m-note-text" placeholder="add a note..." style="flex:1;" />
+      <div class="row" style="margin-top:6px; position:relative;">
+        <input id="m-note-text" placeholder="add a note... (@ to mention someone)" style="flex:1;" />
         <button id="note-add-btn">add</button>
+        <div id="mention-menu" class="template-menu" style="display:none; top:100%;"></div>
       </div>
     </div>
     <div class="modal-actions">
@@ -196,6 +207,7 @@
 
 <script>
 let META = { types: [], statuses: [], priorities: [] };
+let KNOWN_NAMES = [];
 let editingId = null;
 let editingKey = null;
 
@@ -364,6 +376,7 @@ async function loadStats() {
   renderStatRows('s-by-model', s.by_model, r => r.model, r => r.n, false);
   fillFilterPreserving('f-assignee', s.leaderboard.map(r => r.assignee), 'assignee: any');
   wireLeaderboardClicks(s.leaderboard);
+  KNOWN_NAMES = s.leaderboard.map(r => r.assignee);
 }
 
 function wireLeaderboardClicks(rows) {
@@ -405,6 +418,7 @@ function openModal(t) {
   setModelPicker(t ? (t.model || '') : '');
 
   document.getElementById('m-type').value = t ? t.type : 'task';
+  updateDescPlaceholder();
   document.getElementById('m-status').value = t ? t.status : 'todo';
   document.getElementById('m-priority').value = t ? t.priority : 'med';
   document.getElementById('m-assignee').value = t ? (t.assignee || '') : '';
@@ -459,6 +473,61 @@ function toggleNewModel() {
   document.getElementById('m-model-new').style.display = isOther ? 'block' : 'none';
 }
 
+const DESC_TEMPLATES = {
+  bug: {
+    placeholder: 'Steps to reproduce, expected vs actual...',
+    snippet: 'Steps to reproduce:\n1. \n2. \n\nExpected: \nActual: ',
+  },
+  story: {
+    placeholder: 'As a ..., I want ... so that ...',
+    snippet: 'As a [user], I want [goal] so that [benefit].\n\nAcceptance criteria:\n- ',
+  },
+  task: {
+    placeholder: 'What needs to happen, and why...',
+    snippet: 'What needs to happen:\n\nWhy:\n',
+  },
+  epic: {
+    placeholder: 'Outcome and scope for the tasks under this...',
+    snippet: 'Outcome: \n\nScope:\n- In: \n- Out: ',
+  },
+  support: {
+    placeholder: 'Who reported it, impact, workaround...',
+    snippet: 'Reported by: \nImpact: \nWorkaround (if any): ',
+  },
+};
+
+function updateDescPlaceholder() {
+  const type = document.getElementById('m-type').value;
+  const t = DESC_TEMPLATES[type];
+  document.getElementById('m-desc').placeholder = t ? t.placeholder : '';
+}
+
+function hideTemplateMenu() {
+  document.getElementById('desc-template-menu').style.display = 'none';
+}
+
+function showTemplateMenu() {
+  const menu = document.getElementById('desc-template-menu');
+  const currentType = document.getElementById('m-type').value;
+  menu.innerHTML = Object.entries(DESC_TEMPLATES).map(([type, t]) => `
+    <div class="template-menu-item${type === currentType ? ' sel' : ''}" data-type="${type}">
+      <div class="tmi-type">${type}</div>
+      <div class="tmi-hint">${escapeHtml(t.placeholder)}</div>
+    </div>
+  `).join('');
+  menu.style.display = 'block';
+  for (const item of menu.querySelectorAll('.template-menu-item')) {
+    item.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      const type = item.dataset.type;
+      const desc = document.getElementById('m-desc');
+      desc.value = DESC_TEMPLATES[type].snippet;
+      hideTemplateMenu();
+      desc.focus();
+    });
+  }
+}
+
 async function loadNotes(ticketId) {
   const notes = await api(`/api/tickets/${ticketId}/notes`);
   const list = document.getElementById('notes-list');
@@ -475,12 +544,54 @@ async function loadNotes(ticketId) {
   list.scrollTop = list.scrollHeight;
 }
 
+function getWebAuthor() {
+  let name;
+  try { name = localStorage.getItem('tix-web-author'); } catch (e) { name = null; }
+  if (name) return name;
+  name = (prompt('Your name, for the note author (asked once, remembered in this browser):') || '').trim();
+  if (name) { try { localStorage.setItem('tix-web-author', name); } catch (e) {} }
+  return name;
+}
+
+function hideMentionMenu() {
+  document.getElementById('mention-menu').style.display = 'none';
+}
+
+function handleMentionInput(e) {
+  const input = e.target;
+  const val = input.value;
+  const pos = input.selectionStart;
+  const uptoCursor = val.slice(0, pos);
+  const atIndex = uptoCursor.lastIndexOf('@');
+  if (atIndex === -1) { hideMentionMenu(); return; }
+  const partial = uptoCursor.slice(atIndex + 1);
+  if (/\s/.test(partial)) { hideMentionMenu(); return; }
+  const matches = KNOWN_NAMES.filter(n => n.toLowerCase().startsWith(partial.toLowerCase()));
+  if (!matches.length) { hideMentionMenu(); return; }
+  const menu = document.getElementById('mention-menu');
+  menu.innerHTML = matches.map(n => `<div class="template-menu-item" data-name="${escapeHtml(n)}">${escapeHtml(n)}</div>`).join('');
+  menu.style.display = 'block';
+  for (const item of menu.querySelectorAll('.template-menu-item')) {
+    item.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      const name = item.dataset.name;
+      input.value = val.slice(0, atIndex) + '@' + name + ' ' + val.slice(pos);
+      const newPos = atIndex + name.length + 2;
+      input.focus();
+      input.setSelectionRange(newPos, newPos);
+      hideMentionMenu();
+    });
+  }
+}
+
 async function addNote() {
   const text = document.getElementById('m-note-text').value.trim();
   if (!text || !editingId) return;
+  const author = getWebAuthor();
+  if (!author) { alert('A note needs an author — cancelled.'); return; }
   await api(`/api/tickets/${editingId}/notes`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, author }),
   });
   document.getElementById('m-note-text').value = '';
   loadNotes(editingId);
@@ -605,7 +716,14 @@ document.getElementById('note-add-btn').addEventListener('click', addNote);
 document.getElementById('m-project').addEventListener('change', toggleNewProject);
 document.getElementById('m-team').addEventListener('change', toggleNewTeam);
 document.getElementById('m-model').addEventListener('change', toggleNewModel);
-document.getElementById('m-note-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addNote(); } });
+document.getElementById('m-type').addEventListener('change', updateDescPlaceholder);
+document.getElementById('m-desc').addEventListener('input', (e) => {
+  if (e.target.value === '/') showTemplateMenu(); else hideTemplateMenu();
+});
+document.getElementById('m-desc').addEventListener('blur', () => { setTimeout(hideTemplateMenu, 150); });
+document.getElementById('m-note-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); hideMentionMenu(); addNote(); } });
+document.getElementById('m-note-text').addEventListener('input', handleMentionInput);
+document.getElementById('m-note-text').addEventListener('blur', () => { setTimeout(hideMentionMenu, 150); });
 document.getElementById('modal-bg').addEventListener('click', (e) => { if (e.target.id === 'modal-bg') closeModal(); });
 document.getElementById('search').addEventListener('input', debounce(refresh, 250));
 document.getElementById('f-project').addEventListener('change', refresh);

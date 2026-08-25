@@ -125,6 +125,8 @@ def api_notes_list(tid: str):
 
 @app.post("/api/tickets/{tid}/notes")
 def api_notes_add(tid: str, n: NoteIn):
+    if not n.author.strip():
+        raise HTTPException(400, "author is required -- a note with no author is unreadable history")
     real_id = _resolve_or_404(tid)
     tixdb.add_note(real_id, n.text, n.author)
     return tixdb.list_notes(real_id)

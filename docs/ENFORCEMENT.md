@@ -38,6 +38,13 @@ Both print the same JSON. `--session` is only used to remember a checkpoint (und
 `--checkpoint /explicit/path` instead if you'd rather manage that yourself. See
 `tix guard check --help` or [docs/COMMANDS.md](COMMANDS.md) for every flag.
 
+**Migrating from another guard mid-session?** Pre-seed each session's checkpoint file with
+the reviewed offset so the switch doesn't scan the whole transcript and throw one spurious
+block. Seed it with **character length, not byte size** — `guard check` reads the transcript
+with `read_text(errors="ignore")` and resets any offset greater than the decoded string's
+length back to 0, so a byte-size seed silently becomes 0 on any transcript with non-ASCII in
+it. Measure `len()` of the text exactly the way `guard check` does, not `os.path.getsize()`.
+
 ## What counts as "real work"
 
 By default, a generic set of patterns: `git commit`/`push`, `systemctl`, `docker run`/`build`,

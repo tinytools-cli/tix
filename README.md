@@ -9,6 +9,8 @@ bolted on. An agent shelling out to a CLI is cheaper and faster than round-tripp
 and `tix --help` is discoverable in-context the same way any other CLI is — no separate docs
 site an agent has to have been trained on or go fetch.
 
+See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
+
 ## Install
 
 ```

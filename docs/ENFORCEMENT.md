@@ -47,8 +47,13 @@ That's a reasonable default for an agent that edits files and runs shell command
 exactly the case [examples/role-confs/assistant.conf](../examples/role-confs/assistant.conf)
 exists for.
 
-Point `--conf` at your own file — one regex per line, `#` for comments — and it fully replaces
-the defaults for that role. Two examples are included:
+Point `--conf` at your own file — one regex per line, `#` for comments — and it **extends** the
+defaults for that role: your patterns plus the generic set, including the Edit/Write signal.
+Write a conf as "the extra things my job does that the defaults miss," not as a full
+replacement — a role-conf that doesn't mention file edits at all still gets them covered by
+the defaults. Pass `--conf-only` if a role genuinely wants to declare its complete rule set
+instead (the old, non-default behavior) — `guard check` prints which mode is active and how
+many patterns to stderr either way, so it's never silent about it. Two examples are included:
 
 - [examples/role-confs/developer.conf](../examples/role-confs/developer.conf) — close to the
   built-in defaults, a starting point for a code/infra agent.
@@ -72,7 +77,8 @@ the defaults for that role. Two examples are included:
 
 Put that in `.claude/settings.json` (project-scoped) or `~/.claude/settings.json` (every
 session). Optionally set `TIX_GUARD_CONF=/path/to/a/role-conf.conf` in the environment the
-hook runs in to use something other than the generic defaults.
+hook runs in to extend the generic defaults with role-specific patterns, and
+`TIX_GUARD_CONF_ONLY=1` alongside it if that conf should fully replace the defaults instead.
 
 ## Writing an adapter for a different harness
 

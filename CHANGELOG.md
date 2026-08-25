@@ -3,6 +3,19 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.1] - 2026-08-25
+
+### Fixed
+- `tix guard check --conf <role-conf>` now **extends** the built-in default work
+  patterns instead of silently replacing them. A role-conf naturally reads as "the
+  extra things my job does that the defaults miss" — replacing meant a role with a
+  conf quietly stopped being checked for file edits, `rm`, `git commit`, etc. Found
+  by an external adopter trying to migrate onto `guard check`. Added `--conf-only`
+  (and `TIX_GUARD_CONF_ONLY=1` for the Claude Code adapter) to restore the old
+  full-replace behavior for a role that wants to declare its complete rule set.
+  `guard check` now also announces which patterns are active on stderr, so this
+  isn't silent either way.
+
 ## [0.2.0] - 2026-08-25
 
 ### Added

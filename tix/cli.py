@@ -482,27 +482,42 @@ def _guard_checkpoint_path(session):
     return str(d / f"{session}.offset")
 
 
-def _guard_load_patterns(conf_path, fmt):
-    """A role-conf, when given, is the FULL authority on what counts as work for that
-    role -- it replaces the generic defaults rather than adding to them, so a role that
-    doesn't care about file edits (e.g. one that only sends email) can say so. The
-    Claude-Code-specific Edit/Write signal is folded into the generic defaults for the
-    same reason: it only applies when nothing more specific has been declared."""
-    if conf_path:
-        try:
-            lines = Path(conf_path).read_text().splitlines()
-            custom = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
-            if custom:
-                return custom
-        except Exception:
-            pass
+def _guard_load_patterns(conf_path, fmt, conf_only=False):
+    """A role-conf EXTENDS the generic defaults by default -- a conf naturally reads as
+    "the extra things my job does that the defaults miss" (that's how the examples in
+    examples/role-confs/ are written), so silently dropping the defaults the moment a
+    conf is supplied means a role stops being checked for file edits, rm, git commit
+    etc. without any signal that happened. Pass --conf-only for the old full-override
+    behaviour, for a role that genuinely wants to declare its own complete rule set.
+    Prints what's active to stderr either way, since silence is what made this a bug
+    report the first time (found by Ben, TI-59, 2026-08-25)."""
     patterns = list(DEFAULT_WORK_PATTERNS)
     if fmt == "claude-code":
         patterns = patterns + CLAUDE_CODE_EXTRA_PATTERNS
-    return patterns
+
+    if not conf_path:
+        return patterns
+
+    try:
+        lines = Path(conf_path).read_text().splitlines()
+        custom = [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+    except Exception:
+        custom = []
+
+    if not custom:
+        return patterns
+
+    if conf_only:
+        click.echo(f"guard check: using {len(custom)} pattern(s) from {conf_path}; "
+                    "built-in defaults NOT active (--conf-only)", err=True)
+        return custom
+
+    click.echo(f"guard check: using {len(custom)} pattern(s) from {conf_path} "
+                f"plus {len(patterns)} built-in default(s)", err=True)
+    return patterns + custom
 
 
-def _guard_check_impl(transcript, fmt, conf, checkpoint, session):
+def _guard_check_impl(transcript, fmt, conf, checkpoint, session, conf_only=False):
     ckpt_path = checkpoint or _guard_checkpoint_path(session)
     offset = 0
     if ckpt_path and os.path.exists(ckpt_path):
@@ -529,7 +544,7 @@ def _guard_check_impl(transcript, fmt, conf, checkpoint, session):
             except Exception:
                 pass
 
-    patterns = _guard_load_patterns(conf, fmt)
+    patterns = _guard_load_patterns(conf, fmt, conf_only)
     did_work = any(re.search(p, window) for p in patterns)
     if not did_work:
         mark_seen()
@@ -555,9 +570,9 @@ def _guard_check_impl(transcript, fmt, conf, checkpoint, session):
 def guard():
     """Enforcement primitives for wiring tix into an agent harness as a hard gate,
     not just a written convention. `guard check` is harness-agnostic on purpose --
-    see docs/ENFORCEMENT.md for how to wire it into your own harness's hook or
-    callback mechanism (a Claude Code Stop-hook adapter is included as a worked
-    example)."""
+    see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/tix) for how to wire it
+    into your own harness's hook or callback mechanism (a Claude Code Stop-hook
+    adapter is included as a worked example)."""
 
 
 @guard.command("check")
@@ -567,21 +582,27 @@ def guard():
                    "'lines' reads plain text from stdin instead -- one action/command per line, for "
                    "any other harness's adapter to produce however it logs its own actions.")
 @click.option("--conf", default=None, help="path to a role-conf file, one regex per line ('#' comments allowed). "
-                                            "Falls back to built-in generic defaults if omitted or unreadable.")
+                                            "EXTENDS the built-in generic defaults by default -- write a conf as "
+                                            "'the extra things my job does that the defaults miss'. Falls back to "
+                                            "just the built-in defaults if omitted or unreadable.")
+@click.option("--conf-only", is_flag=True, default=False, help="with --conf, use ONLY the conf's patterns -- the "
+                                                                 "built-in defaults (including file-edit detection) "
+                                                                 "are not active. For a role that wants to declare "
+                                                                 "its complete rule set, not just extras.")
 @click.option("--checkpoint", default=None, help="checkpoint file path, tracking what's already been reviewed so "
                                                    "the same work isn't re-flagged forever. Auto-derived from "
                                                    "--session under ~/.tix/guard-checkpoints/ if omitted.")
 @click.option("--session", default=None, help="session identifier -- only used to derive a default --checkpoint path.")
-def guard_check(transcript, fmt, conf, checkpoint, session):
-    """Decide whether real work happened (per the active role-conf, or generic
-    defaults) without any tix activity since the last check for this session.
+def guard_check(transcript, fmt, conf, conf_only, checkpoint, session):
+    """Decide whether real work happened (per the active generic defaults, extended by
+    a role-conf if given) without any tix activity since the last check for this session.
 
     Prints {"decision": "allow"|"block", "reason": ...} as JSON on stdout and
     always exits 0 -- callers read the JSON, not the exit code, so a caller that
     mishandles this can't get stuck. This command doesn't know or care what's
     calling it or what happens on a block -- that's your harness adapter's job."""
     try:
-        result = _guard_check_impl(transcript, fmt, conf, checkpoint, session)
+        result = _guard_check_impl(transcript, fmt, conf, checkpoint, session, conf_only)
     except Exception:
         # Fails open: a broken guard must never be able to wedge a session.
         result = {"decision": "allow", "reason": None}

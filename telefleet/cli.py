@@ -575,7 +575,7 @@ def _guard_check_impl(transcript, fmt, conf, checkpoint, session, conf_only=Fals
 def guard():
     """Enforcement primitives for wiring tix into an agent harness as a hard gate,
     not just a written convention. `guard check` is harness-agnostic on purpose --
-    see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/tix) for how to wire it
+    see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/telefleet) for how to wire it
     into your own harness's hook or callback mechanism (a Claude Code Stop-hook
     adapter is included as a worked example)."""
 

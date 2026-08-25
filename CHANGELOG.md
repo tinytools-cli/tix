@@ -3,6 +3,16 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] - 2026-08-25
+
+### Changed
+- `tix guard check`'s block reason now tells you to pick the ticket type deliberately
+  instead of just nudging you to file something. It previously enforced *that* you
+  file, never *what* — which meant real bugs were landing as notes on task tickets,
+  readable only to someone who already knew to open that ticket. The message now
+  spells out `--type bug` (something was broken, even if fixed in the same breath)
+  vs `task` (a unit of work) vs `story`/`epic` (larger scope).
+
 ## [0.2.1] - 2026-08-25
 
 ### Fixed

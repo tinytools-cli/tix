@@ -559,9 +559,13 @@ def _guard_check_impl(transcript, fmt, conf, checkpoint, session, conf_only=Fals
         "reason": (
             "Real work happened without any tix activity (no 'tix add' / 'tix update' / "
             "'tix note' run) since the last check. File it if this was a real unit of work, "
-            "or proceed if it genuinely didn't need one -- this checks the window since the "
-            "last time it allowed a turn through, not the whole session, so it won't "
-            "re-flag the same thing forever once you've either filed it or moved past it."
+            "or proceed if it genuinely didn't need one. If you do file it, pick the type "
+            "deliberately: --type bug if something was broken or behaved differently from "
+            "what it claims (even if you fixed it in the same breath), task for a unit of "
+            "work, story/epic for larger scope -- a bug filed as a note on a task ticket is "
+            "invisible to anyone who didn't already know to open it. This checks the window "
+            "since the last time it allowed a turn through, not the whole session, so it "
+            "won't re-flag the same thing forever once you've either filed it or moved past it."
         ),
     }
 

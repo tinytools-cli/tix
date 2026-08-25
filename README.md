@@ -1,8 +1,14 @@
-# tix
+# Telefleet
+
+_Agents. Sessions. Tickets. Connected._
 
 A minimal ticket tracker built for agents, not humans-with-a-web-browser-first. CLI-native
 (the primary interface a human or an LLM agent uses), SQLite-backed, with an optional local
 web UI for people who want a dashboard.
+
+Formerly published as `tix`. The rename is cosmetic, not a breaking change: everything below
+still works identically under either name — `tix`/`telefleet` for the CLI, `tix-web`/
+`telefleet-web` for the dashboard, same data, same flags.
 
 Why not Jira/Linear/GitHub Issues for agent work: those are built around a web UI with an API
 bolted on. An agent shelling out to a CLI is cheaper and faster than round-tripping a REST API,
@@ -17,8 +23,8 @@ See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
 pip install .
 ```
 
-This gives you two commands: `tix` (the CLI) and `tix-web` (the optional dashboard, on
-`http://127.0.0.1:8791` by default).
+This gives you `tix`/`telefleet` (the CLI, either name works) and `tix-web`/`telefleet-web`
+(the optional dashboard, on `http://127.0.0.1:8791` by default).
 
 For local development, install it editable instead so code changes take effect immediately:
 

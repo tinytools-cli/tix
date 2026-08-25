@@ -65,7 +65,8 @@ def die_on_tix_error(fn, *args, **kwargs):
 @click.group()
 @click.pass_context
 def cli(ctx):
-    """tix — minimal ticket tracker for humans and agents.
+    """Telefleet (the `tix`/`telefleet` command, either works) — minimal ticket tracker
+    for humans and agents.
 
     First time using a project or team? Register it first:
 
@@ -471,7 +472,7 @@ DEFAULT_WORK_PATTERNS = [
 # Claude Code transcripts also record Edit/Write tool calls as structured JSON,
 # not shell commands -- only relevant for that one transcript format.
 CLAUDE_CODE_EXTRA_PATTERNS = [r'"name":"(Edit|Write)"']
-TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z])tix\s+(add|update|note)(\s|"|$)'
+TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z])(tix|telefleet)\s+(add|update|note)(\s|"|$)'
 
 
 def _guard_checkpoint_path(session):

@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "telefleet"
-version = "0.3.0"
-description = "Telefleet -- a minimal, agent-native ticket tracker. Agents. Sessions. Tickets. Connected. CLI-first, SQLite-backed, with an optional web UI. (Formerly published as 'tix' -- the tix/tix-web commands still work.)"
+name = "tix"
+version = "0.2.3"
+description = "A minimal, agent-native ticket tracker — CLI-first, SQLite-backed, with an optional web UI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -17,14 +17,12 @@ dependencies = [
 ]
 
 [project.scripts]
-telefleet = "telefleet.cli:cli"
-telefleet-web = "telefleet.web:main"
-tix = "telefleet.cli:cli"
-tix-web = "telefleet.web:main"
+tix = "tix.cli:cli"
+tix-web = "tix.web:main"
 
 [tool.setuptools]
-packages = ["telefleet"]
+packages = ["tix"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-telefleet = ["static/*"]
+tix = ["static/*"]

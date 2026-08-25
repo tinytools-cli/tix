@@ -6,7 +6,7 @@
 # knows nothing about Claude Code specifically. This script's only job is
 # translating Claude Code's hook JSON contract to and from that command.
 # Writing an adapter for a different harness means replacing this file, not
-# touching tix at all -- see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/telefleet).
+# touching tix at all -- see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/tix).
 #
 # INSTALL: wire this into a Stop hook in your settings.json, e.g.:
 #   { "hooks": { "Stop": [ { "hooks": [

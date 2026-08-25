@@ -1,21 +1,18 @@
 # Changelog
 
-All notable changes to Telefleet (formerly `tix`) are documented here. Format loosely
-follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+All notable changes to tix are documented here. Format loosely follows
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.3.0] - 2026-08-25
+## [0.2.3] - 2026-08-25
 
-### Changed
-- **Renamed the project to Telefleet.** Cosmetic, not breaking: the package installs as
-  `telefleet`, and both `telefleet`/`tix` (CLI) and `telefleet-web`/`tix-web` (dashboard)
-  commands work identically going forward. No change to the DB path, env var names
-  (`TIX_AGENT`, `TIX_DB_PATH`, `TIX_GUARD_CONF`, etc.), or the ticket-key prefix — those
-  are internal plumbing and existing data references, not branding, and changing them
-  would break every current install and cross-reference for no real benefit.
-- Web dashboard: new Telefleet logo and branding, tagline "Agents. Sessions. Tickets.
-  Connected." in the header.
-- `tix guard check`'s activity detection now also recognizes `telefleet add`/`update`/
-  `note`, not just `tix ...`.
+### Reverted
+- **The v0.3.0 "Telefleet" rename is reverted.** That release renamed the package/repo/CLI
+  from `tix` to `telefleet`. Turned out to be a miscommunication: tix stays tix, standalone,
+  as it was before. Telefleet is a separate, larger name for something tix will be *part of*
+  later, not a replacement for it. v0.3.0 briefly existed as a real published release (repo
+  rename, PyPI-style package rename, GitHub Release) — rather than rewrite that history, this
+  is a forward-fixing revert back to the 0.2.2 state. If you installed v0.3.0, reinstall from
+  this version.
 
 ## [0.2.2] - 2026-08-25
 

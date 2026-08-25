@@ -65,8 +65,7 @@ def die_on_tix_error(fn, *args, **kwargs):
 @click.group()
 @click.pass_context
 def cli(ctx):
-    """Telefleet (the `tix`/`telefleet` command, either works) — minimal ticket tracker
-    for humans and agents.
+    """tix — minimal ticket tracker for humans and agents.
 
     First time using a project or team? Register it first:
 
@@ -472,7 +471,7 @@ DEFAULT_WORK_PATTERNS = [
 # Claude Code transcripts also record Edit/Write tool calls as structured JSON,
 # not shell commands -- only relevant for that one transcript format.
 CLAUDE_CODE_EXTRA_PATTERNS = [r'"name":"(Edit|Write)"']
-TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z])(tix|telefleet)\s+(add|update|note)(\s|"|$)'
+TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z])tix\s+(add|update|note)(\s|"|$)'
 
 
 def _guard_checkpoint_path(session):
@@ -575,7 +574,7 @@ def _guard_check_impl(transcript, fmt, conf, checkpoint, session, conf_only=Fals
 def guard():
     """Enforcement primitives for wiring tix into an agent harness as a hard gate,
     not just a written convention. `guard check` is harness-agnostic on purpose --
-    see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/telefleet) for how to wire it
+    see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/tix) for how to wire it
     into your own harness's hook or callback mechanism (a Claude Code Stop-hook
     adapter is included as a worked example)."""
 

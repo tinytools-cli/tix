@@ -3,6 +3,14 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.5] - 2026-08-26
+
+### Added
+- tix now checks once a day whether a newer release is available and prints a
+  one-line nudge (with a link to the release) if so -- same pattern as the
+  existing "N ticket(s) changed" inbox notification. Silent when up to date,
+  offline, or running from an uninstalled dev copy.
+
 ## [0.2.4] - 2026-08-26
 
 ### Added

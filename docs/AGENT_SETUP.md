@@ -20,6 +20,9 @@ reference). Follow this, don't just know it exists:
 - **File a ticket before starting any real unit of work** — not every command, not reads or
   quick lookups, but anything with a start and a finish someone might reasonably ask about
   later: `tix add "<what you're doing>" --project <name> --model <tier> --status in_progress`.
+  **Lead the description with the one-line purpose**, like a commit message subject —
+  `tix search` shows a preview of the description under each match, so a vague opener means
+  the next agent can't tell if a result is relevant without opening it.
 - **Finishing means leaving a note, not flipping a status.** Before `tix update <key> --status
   done`, always `tix note add <key> "..."` covering, in order: (1) what you actually did, (2)
   where the output is — file paths, commit hashes, service names, (3) what you found — the

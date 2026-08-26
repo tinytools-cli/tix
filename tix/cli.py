@@ -46,6 +46,17 @@ def fmt_row(t):
     return f"{key:<8} {project}{team}{t['type']:<7} {t['status']:<11} {t['priority']:<5} {t['title']}{parent}{blocked}{assignee}{model}{tags}"
 
 
+def fmt_snippet(desc, width=120):
+    """A one-line preview of a ticket's description, for search results that would
+    otherwise be title-only even though the match may be in the description or a
+    note. Collapses whitespace so a multi-paragraph description doesn't break the
+    one-line-per-result output."""
+    text = " ".join((desc or "").split())
+    if not text:
+        return None
+    return text[:width] + ("..." if len(text) > width else "")
+
+
 def resolve_tid(identifier):
     tid = tixdb.resolve_ticket_id(identifier)
     if tid is None:
@@ -122,7 +133,9 @@ def cli(ctx):
 @click.argument("title")
 @click.option("--type", "type_", default="task", type=click.Choice(tixdb.TYPES),
               help="epic = weeks-to-a-month of work. story/task/bug/support = hours to a couple of days.")
-@click.option("--desc", default="")
+@click.option("--desc", default="", help="lead with the one-line purpose, like a commit message subject -- "
+                                          "'tix search' shows the first ~120 characters of this as a preview, "
+                                          "so a vague opener means an agent can't tell relevance without opening it.")
 @click.option("--status", default="todo", type=click.Choice(tixdb.STATUSES))
 @click.option("--priority", default="med", type=click.Choice(tixdb.PRIORITIES))
 @click.option("--parent", "parent", default=None, help="parent ticket key or id (must be an epic)")
@@ -396,13 +409,18 @@ def rm(tid):
 @cli.command()
 @click.argument("text")
 def search(text):
-    """Full-text search across title, description, tags, project, team, assignee, key, and notes."""
+    """Full-text search across title, description, tags, project, team, assignee, key, and notes.
+    Prints a short description preview under each match, since the match may be in the
+    description or a note rather than the title -- run `tix show <key>` to read the rest."""
     rows = tixdb.search_tickets(text)
     if not rows:
         click.echo("no matches")
         return
     for t in rows:
         click.echo(fmt_row(t))
+        snippet = fmt_snippet(t.get("description"))
+        if snippet:
+            click.echo(f"         {snippet}")
 
 
 @cli.command()

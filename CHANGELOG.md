@@ -3,6 +3,16 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.4] - 2026-08-26
+
+### Added
+- `tix search` now shows a preview of the description under each match, since the
+  match may be in the description or a note rather than the title -- previously an
+  agent had to open every candidate with `tix show` to tell if it was relevant.
+  `--desc` help text and `docs/AGENT_SETUP.md` now nudge toward leading a
+  description with a one-line purpose (like a commit message subject) so the
+  preview is actually useful.
+
 ## [0.2.3] - 2026-08-25
 
 ### Reverted

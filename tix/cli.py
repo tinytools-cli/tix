@@ -3,7 +3,9 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
 import click
@@ -11,6 +13,63 @@ import click
 from . import db as tixdb
 
 tixdb.init_db()
+
+UPDATE_CACHE = Path.home() / ".tix" / "update-check.json"
+
+
+def _version_tuple(v):
+    try:
+        return tuple(int(p) for p in v.split("."))
+    except ValueError:
+        return (0,)
+
+
+def _check_for_update():
+    """Once a day at most, check GitHub for a newer release than what's installed
+    and return its version if so -- None otherwise (up to date, checked too
+    recently, offline, or running from an uninstalled dev copy where there's no
+    installed version to compare against). Never raises: a broken update check
+    must never break the command someone's actually trying to run."""
+    try:
+        installed = pkg_version("tix")
+    except PackageNotFoundError:
+        return None
+
+    now = datetime.now(timezone.utc)
+    cache = {}
+    if UPDATE_CACHE.exists():
+        try:
+            cache = json.loads(UPDATE_CACHE.read_text())
+        except Exception:
+            cache = {}
+
+    last_checked = cache.get("last_checked")
+    if last_checked:
+        try:
+            if now - datetime.fromisoformat(last_checked) < timedelta(hours=24):
+                return None
+        except Exception:
+            pass
+
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/tix-cli/tix/releases/latest",
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            latest = json.loads(resp.read()).get("tag_name", "").lstrip("v")
+    except Exception:
+        return None
+
+    try:
+        UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        UPDATE_CACHE.write_text(json.dumps({"last_checked": now.isoformat(), "latest": latest}))
+    except Exception:
+        pass
+
+    if latest and _version_tuple(latest) > _version_tuple(installed):
+        return latest, installed
+    return None
 
 
 def resolve_by(by):
@@ -127,6 +186,12 @@ def cli(ctx):
         n = tixdb.count_inbox(agent)
         if n:
             click.echo(f"{n} ticket(s) changed — tix inbox", err=True)
+
+    update = _check_for_update()
+    if update:
+        latest, installed = update
+        click.echo(f"tix v{latest} is available (you have v{installed}) -- "
+                    "see https://github.com/tix-cli/tix/releases", err=True)
 
 
 @cli.command()

@@ -53,7 +53,7 @@ def _check_for_update():
 
     try:
         req = urllib.request.Request(
-            "https://api.github.com/repos/tix-cli/tix/releases/latest",
+            "https://api.github.com/repos/tinytools-cli/tix/releases/latest",
             headers={"Accept": "application/vnd.github+json"},
         )
         with urllib.request.urlopen(req, timeout=3) as resp:
@@ -191,7 +191,7 @@ def cli(ctx):
     if update:
         latest, installed = update
         click.echo(f"tix v{latest} is available (you have v{installed}) -- "
-                    "see https://github.com/tix-cli/tix/releases", err=True)
+                    "see https://github.com/tinytools-cli/tix/releases", err=True)
 
 
 @cli.command()
@@ -696,7 +696,7 @@ def _guard_check_impl(transcript, fmt, conf, checkpoint, session, conf_only=Fals
 def guard():
     """Enforcement primitives for wiring tix into an agent harness as a hard gate,
     not just a written convention. `guard check` is harness-agnostic on purpose --
-    see docs/ENFORCEMENT.md in the repo (github.com/tix-cli/tix) for how to wire it
+    see docs/ENFORCEMENT.md in the repo (github.com/tinytools-cli/tix) for how to wire it
     into your own harness's hook or callback mechanism (a Claude Code Stop-hook
     adapter is included as a worked example)."""
 

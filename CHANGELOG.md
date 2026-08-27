@@ -3,6 +3,15 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.8] - 2026-08-27
+
+### Changed
+- The GitHub org moved: `tix-cli` -> `tinytools-cli` (Guillermo's call -- the org is
+  becoming a small family of standalone tools, not just tix). Updated the
+  update-check URL, README, and the enforcement adapter's doc pointer to match --
+  the update-check nudge would have silently stopped working against the old,
+  now-redirected org otherwise. Repo URLs under the old org continue to redirect.
+
 ## [0.2.7] - 2026-08-27
 
 ### Added

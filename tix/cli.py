@@ -488,6 +488,45 @@ def search(text):
             click.echo(f"         {snippet}")
 
 
+def _story_check(desc):
+    """A story's description is 'incomplete' if it has no Acceptance Criteria
+    section, or that section is still the unfilled Given/[context]/[action]/
+    [outcome] placeholder from the template -- a warning signal only, never a
+    reason to refuse anything. Scoped to --type story specifically, not every
+    ticket -- a task or bug was never asked to look like a user story."""
+    problems = []
+    m = re.search(r"^##\s+Acceptance Criteria\s*$", desc or "", re.MULTILINE)
+    if not m:
+        problems.append("no 'Acceptance Criteria' section")
+        return problems
+    rest = desc[m.end():]
+    next_header = re.search(r"^##\s+", rest, re.MULTILINE)
+    content = (rest[:next_header.start()] if next_header else rest).strip()
+    if not content or "[context]" in content or "[action]" in content or "[outcome]" in content:
+        problems.append("Acceptance Criteria section is still the unfilled template")
+    return problems
+
+
+@cli.command()
+@click.argument("tid")
+def check(tid):
+    """Warn if a --type story ticket is missing real Acceptance Criteria.
+    Never blocks -- a warning signal, same as tix guard check's philosophy.
+    No-op (prints nothing, exits 0) for any type other than story."""
+    real_id = resolve_tid(tid)
+    t = tixdb.get_ticket(real_id)
+    if t["type"] != "story":
+        click.echo(f"'{t['type']}' tickets aren't checked -- this only applies to --type story")
+        return
+    problems = _story_check(t.get("description"))
+    if not problems:
+        click.echo("looks complete -- has real Acceptance Criteria")
+        return
+    click.echo(f"{len(problems)} issue(s):")
+    for p in problems:
+        click.echo(f"  - {p}")
+
+
 @cli.command()
 @click.option("--limit", default=20, help="how many entries to show")
 @click.option("--project", default=None)

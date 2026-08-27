@@ -3,6 +3,18 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.7] - 2026-08-27
+
+### Added
+- `tix check <key>` — warns if a `--type story` ticket has no real Acceptance
+  Criteria (missing section, or the unfilled `[context]`/`[action]`/`[outcome]`
+  template left in place). Never blocks; a warning signal only. No-ops for any
+  other ticket type.
+- The `story` description template is now a real scrum-style template: "As a
+  [role], I want [goal], so that [benefit]" plus a Given/When/Then Acceptance
+  Criteria section, with inline guidance on why each part matters rather than
+  just brackets to fill in.
+
 ## [0.2.6] - 2026-08-27
 
 ### Added

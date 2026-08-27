@@ -479,8 +479,13 @@ const DESC_TEMPLATES = {
     snippet: 'Steps to reproduce:\n1. \n2. \n\nExpected: \nActual: ',
   },
   story: {
-    placeholder: 'As a ..., I want ... so that ...',
-    snippet: 'As a [user], I want [goal] so that [benefit].\n\nAcceptance criteria:\n- ',
+    placeholder: 'As a [role], I want [goal], so that [benefit]. Then Acceptance Criteria below...',
+    snippet: 'As a [role], I want [goal], so that [benefit].\n' +
+             '(One sentence. If you can\'t state the benefit, it\'s probably a task wearing a story\'s clothes.)\n\n' +
+             '## Acceptance Criteria\n' +
+             '(Concrete and testable -- someone else should be able to check these without asking what "done" means.)\n' +
+             '- Given [context], when [action], then [outcome]\n' +
+             '- Given [context], when [action], then [outcome]\n',
   },
   task: {
     placeholder: 'What needs to happen, and why...',

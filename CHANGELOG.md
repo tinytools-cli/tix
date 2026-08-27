@@ -3,6 +3,17 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.10] - 2026-08-27
+
+### Changed
+- The `--model` nudge added in 0.2.9 was scoped to `haiku` only, on the assumption
+  that an expensive session doing cheap work was the only direction worth
+  flagging. Guillermo's correction: it's for any model -- an under-powered
+  session grinding through work that should have escalated is the same problem
+  in the other direction, and `--model` is a dispatch instruction either way,
+  not documentation. `tix add`/`show`/`update --status in_progress` now nudge
+  for whatever model a ticket declares, naming it in the message.
+
 ## [0.2.9] - 2026-08-27
 
 ### Added

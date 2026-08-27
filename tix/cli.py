@@ -76,17 +76,17 @@ def _model_nudge(model):
     """Soft nudge only -- same tone as the inbox/update-available nudges.
 
     --model records intent, not what actually ran the work: nothing stops an agent
-    from filing --model haiku and then doing the work itself in a more expensive
-    session. tix has no way to detect what model is actually calling it (no env var
-    exposes that), so this can't catch a real mismatch -- it can only remind, on
-    every touch of a haiku-tagged ticket, that the point of haiku is to hand the
-    work to a haiku sub-agent rather than do it in place. Scoped to haiku only:
-    that's the direction that wastes tokens (expensive session, cheap work);
-    sonnet/opus tickets don't need the reminder."""
-    if model == "haiku":
-        click.echo("haiku task -- if you're not already running as haiku, spawn a sub-agent "
-                    "on it rather than doing this yourself. That's the actual token-saving move.",
-                    err=True)
+    from filing --model X and then doing the work itself in whatever session it
+    already has open. tix has no way to detect what model is actually calling it
+    (no env var exposes that), so this can't catch a real mismatch in either
+    direction -- cheap ticket done in an expensive session, or an expensive
+    ticket done on the cheap by a session that should have escalated. It can
+    only remind, on every touch of the ticket, that the declared model is a
+    dispatch instruction, not documentation -- covers every --model value, not
+    just haiku."""
+    if model:
+        click.echo(f"model: {model} -- if you're not already running as {model}, spawn a "
+                    f"sub-agent on it for this rather than doing it in place.", err=True)
 
 
 def resolve_by(by):

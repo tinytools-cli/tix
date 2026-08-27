@@ -753,9 +753,20 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
-loadMeta().then(refresh);
+loadMeta().then(refresh).then(openTicketFromUrl);
 loadStats();
 updateActiveCard();
+
+async function openTicketFromUrl() {
+  // Deep link for other tools to point at a specific ticket, e.g. dox's
+  // auto-linked ticket-key mentions -- ?ticket=TI-59 opens that ticket's modal.
+  const key = new URLSearchParams(location.search).get('ticket');
+  if (!key) return;
+  try {
+    const res = await fetch(`/api/tickets/${encodeURIComponent(key)}`);
+    if (res.ok) openModal(await res.json());
+  } catch (e) {}
+}
 
 </script>
 </body>

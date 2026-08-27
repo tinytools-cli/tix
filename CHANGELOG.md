@@ -3,6 +3,13 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.6] - 2026-08-27
+
+### Added
+- Web dashboard: `?ticket=<key>` in the URL opens that ticket's modal on load --
+  a deep link for other tools to point directly at a ticket instead of just
+  linking to the dashboard's root.
+
 ## [0.2.5] - 2026-08-26
 
 ### Added

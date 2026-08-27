@@ -3,6 +3,18 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.9] - 2026-08-27
+
+### Added
+- A soft nudge on `--model haiku` tickets: `tix add`, `tix show`, and `tix update
+  --status in_progress` now print a one-line stderr reminder to actually spawn a
+  haiku sub-agent for the work rather than doing it in a more expensive session.
+  `--model` records intent, not what actually ran the work, and tix has no way to
+  detect the calling session's real model (no env var exposes it) -- so this can't
+  catch a genuine mismatch, only remind at every point an agent touches a
+  haiku-tagged ticket, including right before picking it up. Never blocks, same
+  tone as every other tix nudge.
+
 ## [0.2.8] - 2026-08-27
 
 ### Changed

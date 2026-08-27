@@ -72,6 +72,23 @@ def _check_for_update():
     return None
 
 
+def _model_nudge(model):
+    """Soft nudge only -- same tone as the inbox/update-available nudges.
+
+    --model records intent, not what actually ran the work: nothing stops an agent
+    from filing --model haiku and then doing the work itself in a more expensive
+    session. tix has no way to detect what model is actually calling it (no env var
+    exposes that), so this can't catch a real mismatch -- it can only remind, on
+    every touch of a haiku-tagged ticket, that the point of haiku is to hand the
+    work to a haiku sub-agent rather than do it in place. Scoped to haiku only:
+    that's the direction that wastes tokens (expensive session, cheap work);
+    sonnet/opus tickets don't need the reminder."""
+    if model == "haiku":
+        click.echo("haiku task -- if you're not already running as haiku, spawn a sub-agent "
+                    "on it rather than doing this yourself. That's the actual token-saving move.",
+                    err=True)
+
+
 def resolve_by(by):
     """--by defaults to $TIX_AGENT (the identity tix inbox also nudges) so agents whose
     shell exports it don't have to repeat themselves on every add/update."""
@@ -221,6 +238,7 @@ def add(title, type_, desc, status, priority, parent, blocked_by, project, team,
     tid = die_on_tix_error(tixdb.add_ticket, type_, title, desc, status, priority, parent_id, project, team, assignee, model, tags, blocked_by_id, created_at, by)
     t = tixdb.get_ticket(tid)
     click.echo(f"created {t['ticket_key'] or ('#' + str(tid))}")
+    _model_nudge(t["model"])
 
 
 @cli.command("list")
@@ -360,6 +378,7 @@ def show(tid):
         for n in notes:
             who = f" ({n['author']})" if n["author"] else ""
             click.echo(f"  [{n['created_at']}]{who} {n['text']}")
+    _model_nudge(t["model"])
 
 
 @cli.group()
@@ -460,6 +479,8 @@ def update(tid, title, desc, status, priority, type_, parent, blocked_by, projec
         raise SystemExit(1)
     t = die_on_tix_error(tixdb.update_ticket, real_id, resolve_by(by), **fields)
     click.echo(f"updated {t['ticket_key'] or ('#' + str(real_id))}")
+    if fields.get("status") == "in_progress":
+        _model_nudge(t["model"])
 
 
 @cli.command()

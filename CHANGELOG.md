@@ -3,6 +3,16 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.11] - 2026-08-27
+
+### Changed
+- The update-available notice used to just print the same passive line every
+  ~24h, forever, until someone upgraded. It now: (1) explicitly tells the
+  agent to tell the human and ask if they want it upgraded, (2) fires once
+  when a new version first appears, (3) reminds once more if ~2 days pass
+  with no upgrade, then (4) goes quiet on that version for good. A genuinely
+  newer release resets the cycle; upgrading clears it outright.
+
 ## [0.2.10] - 2026-08-27
 
 ### Changed

@@ -25,11 +25,20 @@ def _version_tuple(v):
 
 
 def _check_for_update():
-    """Once a day at most, check GitHub for a newer release than what's installed
-    and return its version if so -- None otherwise (up to date, checked too
-    recently, offline, or running from an uninstalled dev copy where there's no
-    installed version to compare against). Never raises: a broken update check
-    must never break the command someone's actually trying to run."""
+    """Return (latest, installed) when it's time to NOTIFY about a pending update,
+    None otherwise. Two separate throttles, easy to conflate:
+
+    1. THE NETWORK CHECK -- at most once every 24h (cache["last_checked"]),
+       purely to avoid hammering GitHub's API. Independent of whether we've
+       already told anyone about the result.
+    2. THE NOTIFICATION -- fires once when a new version first appears, once
+       more ~2 days later if still not upgraded, then goes quiet on that
+       version forever (Guillermo, 2026-08-27: tell the human, ask if they
+       want it, remind once, then stop nagging). A genuinely newer release
+       resets the two-strike count; upgrading clears it outright.
+
+    Never raises: a broken update check must never break the command someone's
+    actually trying to run."""
     try:
         installed = pkg_version("tix")
     except PackageNotFoundError:
@@ -43,33 +52,58 @@ def _check_for_update():
         except Exception:
             cache = {}
 
+    latest = cache.get("latest")
     last_checked = cache.get("last_checked")
+    stale = True
     if last_checked:
         try:
-            if now - datetime.fromisoformat(last_checked) < timedelta(hours=24):
-                return None
+            stale = now - datetime.fromisoformat(last_checked) >= timedelta(hours=24)
         except Exception:
-            pass
+            stale = True
 
-    try:
-        req = urllib.request.Request(
-            "https://api.github.com/repos/tinytools-cli/tix/releases/latest",
-            headers={"Accept": "application/vnd.github+json"},
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            latest = json.loads(resp.read()).get("tag_name", "").lstrip("v")
-    except Exception:
-        return None
+    if stale:
+        try:
+            req = urllib.request.Request(
+                "https://api.github.com/repos/tinytools-cli/tix/releases/latest",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                fetched = json.loads(resp.read()).get("tag_name", "").lstrip("v")
+            if fetched:
+                latest = fetched
+                cache["last_checked"] = now.isoformat()
+                cache["latest"] = latest
+        except Exception:
+            pass  # keep whatever `latest` the cache already had, if any
+
+    notify = cache.get("notify") or {}
+    fire = False
+    if not latest or _version_tuple(latest) <= _version_tuple(installed):
+        # up to date (or the human already upgraded) -- clear so the next
+        # real release starts its own fresh two-strike cycle
+        if notify:
+            cache["notify"] = {}
+    elif notify.get("version") != latest:
+        # first time this specific version has been seen
+        cache["notify"] = {"version": latest, "first_notified_at": now.isoformat(), "reminders_sent": 1}
+        fire = True
+    elif notify.get("reminders_sent", 0) < 2:
+        try:
+            due = now - datetime.fromisoformat(notify["first_notified_at"]) >= timedelta(days=2)
+        except Exception:
+            due = False
+        if due:
+            cache["notify"] = {**notify, "reminders_sent": 2}
+            fire = True
+    # else: already reminded twice about this version -- stay quiet
 
     try:
         UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        UPDATE_CACHE.write_text(json.dumps({"last_checked": now.isoformat(), "latest": latest}))
+        UPDATE_CACHE.write_text(json.dumps(cache))
     except Exception:
         pass
 
-    if latest and _version_tuple(latest) > _version_tuple(installed):
-        return latest, installed
-    return None
+    return (latest, installed) if fire else None
 
 
 def _model_nudge(model):
@@ -207,8 +241,8 @@ def cli(ctx):
     update = _check_for_update()
     if update:
         latest, installed = update
-        click.echo(f"tix v{latest} is available (you have v{installed}) -- "
-                    "see https://github.com/tinytools-cli/tix/releases", err=True)
+        click.echo(f"tix v{latest} is available (you have v{installed}) -- tell your human and ask "
+                    "if they want it upgraded: https://github.com/tinytools-cli/tix/releases", err=True)
 
 
 @cli.command()

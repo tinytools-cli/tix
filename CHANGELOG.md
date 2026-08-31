@@ -3,6 +3,18 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.12] - 2026-08-31
+
+### Fixed
+- `tix project add` on an already-registered name silently ignored a changed
+  `--folder` and returned the stale row -- the CLI still printed "registered
+  project ..." as if it had taken effect, with no warning it was a no-op
+  (TI-88, filed by Alex after a real moved-project folder never actually
+  updated). `add` now updates the folder when it differs, errors clearly if
+  `--key` conflicts with the existing project's key (changing a key would
+  invalidate every ticket key already using it), and reports which of the
+  three things happened: registered / updated / already registered.
+
 ## [0.2.11] - 2026-08-27
 
 ### Changed

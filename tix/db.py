@@ -204,6 +204,14 @@ def resolve_team(conn, identifier):
 
 
 def add_project(name, folder="", key=None):
+    """Register a project, or fix up an existing one's folder.
+
+    TI-88: re-running this on an existing name used to silently ignore a
+    changed --folder and return the stale row -- the CLI still printed
+    "registered project ..." as if it had taken effect. `add` is now the
+    same command you use to fix a moved folder, and always says which of
+    the three things actually happened (created / updated / unchanged) via
+    result["_state"], rather than reporting "registered" regardless."""
     if not folder:
         raise TixError(
             "folder is required — where does this project's context/files/downloads live? "
@@ -216,8 +224,29 @@ def add_project(name, folder="", key=None):
     conn = get_conn()
     existing = conn.execute("SELECT * FROM projects WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
     if existing:
+        existing = dict(existing)
+        if key and key.upper() != existing["key"]:
+            conn.close()
+            raise TixError(
+                f"project '{name}' already exists with key '{existing['key']}' -- changing a "
+                f"project's key would invalidate every ticket key already using it, so that's "
+                f"not supported here. Pick a different name if you meant a separate project."
+            )
+        if existing.get("folder") == folder:
+            existing["_state"] = "unchanged"
+            conn.close()
+            return existing
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            conn.close()
+            raise TixError(f"couldn't create folder '{folder}': {e}")
+        conn.execute("UPDATE projects SET folder = ? WHERE key = ?", (folder, existing["key"]))
+        conn.commit()
         conn.close()
-        return dict(existing)
+        existing["folder"] = folder
+        existing["_state"] = "updated"
+        return existing
     taken = {r["key"] for r in conn.execute("SELECT key FROM projects")}
     if key:
         key = key.upper()
@@ -235,7 +264,7 @@ def add_project(name, folder="", key=None):
                  (key, name, folder, now()))
     conn.commit()
     conn.close()
-    return {"key": key, "name": name, "next_seq": 1, "folder": folder}
+    return {"key": key, "name": name, "next_seq": 1, "folder": folder, "_state": "created"}
 
 
 def rename_project(identifier, new_name):

@@ -340,7 +340,8 @@ def project():
                    "just reserves the location.")
 def project_add(name, key, folder):
     row = die_on_tix_error(tixdb.add_project, name, folder, key)
-    click.echo(f"registered project '{row['name']}' — key {row['key']} (tickets will be {row['key']}-1, {row['key']}-2, ...), folder {row.get('folder', folder)}")
+    verb = {"created": "registered", "updated": "updated", "unchanged": "already registered"}[row.get("_state", "created")]
+    click.echo(f"{verb} project '{row['name']}' — key {row['key']} (tickets will be {row['key']}-1, {row['key']}-2, ...), folder {row.get('folder', folder)}")
 
 
 @project.command("list")

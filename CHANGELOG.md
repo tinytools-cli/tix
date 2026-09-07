@@ -3,6 +3,16 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.13] - 2026-09-07
+
+### Fixed
+- The `--model` nudge printed on `add`/`show`/`update` (`model: <value> -- if you're
+  not already running as <value>, spawn a sub-agent...`) was indistinguishable from
+  real ticket data on the same stream, and was reported four times as a possible
+  prompt-injected line riding along with legitimate output (TI-93). It was always a
+  deliberate, static nudge, not injected or generated text -- now prefixed with
+  `[tix nudge]` so it reads unambiguously as tix's own commentary, not ticket content.
+
 ## [0.2.12] - 2026-08-31
 
 ### Fixed

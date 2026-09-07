@@ -119,8 +119,9 @@ def _model_nudge(model):
     dispatch instruction, not documentation -- covers every --model value, not
     just haiku."""
     if model:
-        click.echo(f"model: {model} -- if you're not already running as {model}, spawn a "
-                    f"sub-agent on it for this rather than doing it in place.", err=True)
+        click.echo(f"[tix nudge] declared model: {model} -- if you're not already running as "
+                    f"{model}, spawn a sub-agent on it for this rather than doing it in place.",
+                    err=True)
 
 
 def resolve_by(by):

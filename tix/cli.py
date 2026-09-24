@@ -650,7 +650,10 @@ DEFAULT_WORK_PATTERNS = [
 # Claude Code transcripts also record Edit/Write tool calls as structured JSON,
 # not shell commands -- only relevant for that one transcript format.
 CLAUDE_CODE_EXTRA_PATTERNS = [r'"name":"(Edit|Write)"']
-TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z])tix\s+(add|update|note)(\s|"|$)'
+# Claude Code transcripts are raw JSONL, so a newline inside a Bash command is the two
+# characters backslash-n, and the 'n' looked like a letter to [^a-zA-Z] -- `tix` at the start
+# of a line (after a heredoc, say) was invisible and the guard falsely blocked (TI-95).
+TIX_ACTIVITY_PATTERN = r'(^|[^a-zA-Z]|\\[nrt])tix\s+(add|update|note)(\s|"|$)'
 
 
 def _guard_checkpoint_path(session):

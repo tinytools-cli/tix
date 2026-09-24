@@ -3,6 +3,15 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.14] - 2026-09-24
+
+### Fixed
+- `tix guard check --format claude-code` falsely blocked windows that did contain tix
+  activity (TI-95, reported by Ben, six firings across two sessions). Transcripts are raw
+  JSONL, where a newline inside a command is a literal backslash-n; the `n` counted as a
+  letter, so `tix add/update/note` at the start of a line (e.g. right after a heredoc) was
+  never recognised. Line-start `tix` calls in a multi-line command now count.
+
 ## [0.2.13] - 2026-09-07
 
 ### Fixed

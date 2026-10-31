@@ -33,7 +33,7 @@ def _check_for_update():
        already told anyone about the result.
     2. THE NOTIFICATION -- fires once when a new version first appears, once
        more ~2 days later if still not upgraded, then goes quiet on that
-       version forever (Guillermo, 2026-08-27: tell the human, ask if they
+       version forever (tell the human, ask if they
        want it, remind once, then stop nagging). A genuinely newer release
        resets the two-strike count; upgrading clears it outright.
 
@@ -124,6 +124,41 @@ def _model_nudge(model):
                     err=True)
 
 
+INBOX_NUDGE_STATE = Path.home() / ".tix" / "inbox-nudge.json"
+INBOX_NUDGE_EVERY = timedelta(minutes=5)
+
+
+def _inbox_nudge_due(agent, n):
+    """TI-102a: the 'N ticket(s) changed' line used to print on EVERY command. Now:
+    TIX_INBOX_NUDGE=1 forces it every time (agents that rely on it), =0 silences it;
+    otherwise it is shown only on an interactive terminal (stdout is a TTY), and then only
+    when the count changed since last shown or 5 minutes have passed. Never raises."""
+    mode = os.environ.get("TIX_INBOX_NUDGE", "")
+    if mode == "1":
+        return True
+    if mode == "0" or not sys.stdout.isatty():
+        return False
+    now = datetime.now(timezone.utc)
+    try:
+        state = json.loads(INBOX_NUDGE_STATE.read_text())
+    except Exception:
+        state = {}
+    last = state.get(agent) or {}
+    try:
+        recent = now - datetime.fromisoformat(last["at"]) < INBOX_NUDGE_EVERY
+    except Exception:
+        recent = False
+    if recent and last.get("count") == n:
+        return False
+    state[agent] = {"count": n, "at": now.isoformat()}
+    try:
+        INBOX_NUDGE_STATE.parent.mkdir(parents=True, exist_ok=True)
+        INBOX_NUDGE_STATE.write_text(json.dumps(state))
+    except Exception:
+        pass
+    return True
+
+
 def resolve_by(by):
     """--by defaults to $TIX_AGENT (the identity tix inbox also nudges) so agents whose
     shell exports it don't have to repeat themselves on every add/update."""
@@ -145,16 +180,50 @@ def parse_created_at(value):
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+DEFAULT_DISPLAY_TZ = "UTC"
+
+
+def display_tz():
+    """Timezone timestamps are DISPLAYED in (TI-102d). Storage stays UTC. Order: $TIX_TZ,
+    then $TZ, then UTC. An unknown name falls back to the
+    default rather than breaking the command. TIX_TZ=UTC shows the stored values as-is."""
+    from zoneinfo import ZoneInfo
+    for name in (os.environ.get("TIX_TZ"), os.environ.get("TZ"), DEFAULT_DISPLAY_TZ):
+        if name:
+            try:
+                return ZoneInfo(name)
+            except Exception:
+                continue
+    return timezone.utc
+
+
+def fmt_ts(value):
+    """Stored UTC ISO timestamp -> same ISO format in the display timezone (offset included,
+    so it stays unambiguous and machine-parseable). Anything unparseable is returned as-is."""
+    if not value or not isinstance(value, str):
+        return value
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(display_tz()).isoformat(timespec="seconds")
+
+
 def fmt_row(t):
     key = t.get("ticket_key") or f"#{t['id']}"
     parent = f" ^{t.get('parent_key') or t['parent_id']}" if t["parent_id"] else ""
     blocked = f" !{t.get('blocked_by_key') or t['blocked_by']}" if t.get("blocked_by") else ""
+    if t.get("blocked_on"):
+        blocked += f" ⏳{t['blocked_on']}"
     tags = f" [{t['tags']}]" if t["tags"] else ""
     project = f"{t['project']:<12} " if t.get("project") else f"{'':<12} "
     team = f"{t['team']:<11} " if t.get("team") else f"{'':<11} "
     model = f" ({t['model']})" if t.get("model") else ""
     assignee = f" @{t['assignee']}" if t.get("assignee") else ""
-    return f"{key:<8} {project}{team}{t['type']:<7} {t['status']:<11} {t['priority']:<5} {t['title']}{parent}{blocked}{assignee}{model}{tags}"
+    shas = "".join(f" {lbl}:{t[col][:7]}" for lbl, col in (("stg", "staging_sha"), ("prod", "prod_sha")) if t.get(col))
+    return f"{key:<8} {project}{team}{t['type']:<7} {t['status']:<11} {t['priority']:<5} {t['title']}{parent}{blocked}{assignee}{model}{tags}{shas}"
 
 
 def fmt_snippet(desc, width=120):
@@ -236,7 +305,7 @@ def cli(ctx):
     agent = os.environ.get("TIX_AGENT", "")
     if agent and ctx.invoked_subcommand != "inbox":
         n = tixdb.count_inbox(agent)
-        if n:
+        if n and _inbox_nudge_due(agent, n):
             click.echo(f"{n} ticket(s) changed — tix inbox", err=True)
 
     update = _check_for_update()
@@ -257,6 +326,7 @@ def cli(ctx):
 @click.option("--priority", default="med", type=click.Choice(tixdb.PRIORITIES))
 @click.option("--parent", "parent", default=None, help="parent ticket key or id (must be an epic)")
 @click.option("--blocked-by", "blocked_by", default=None, help="ticket key or id this is stuck behind — a reference only, not enforced")
+@click.option("--blocked-on", "blocked_on", default="", help="who/what this waits on: a person (alice) or a ticket key (NS-3). Structured, filterable via `tix list --blocked-on`.")
 @click.option("--project", required=True, help="required — project name or key, must already be registered (tix project add)")
 @click.option("--team", default="", help="team name — must already be registered (tix team add)")
 @click.option("--assignee", default="")
@@ -264,13 +334,13 @@ def cli(ctx):
 @click.option("--tags", default="")
 @click.option("--created-at", default=None, help="backdate the ticket's created/updated time (ISO date or datetime, e.g. 2026-08-15) — for importing history, not normal use")
 @click.option("--by", default=None, help="who's creating this — defaults to $TIX_AGENT if set. Used to skip your own entries in your inbox, nothing else.")
-def add(title, type_, desc, status, priority, parent, blocked_by, project, team, assignee, model, tags, created_at, by):
+def add(title, type_, desc, status, priority, parent, blocked_by, blocked_on, project, team, assignee, model, tags, created_at, by):
     """Add a new ticket."""
     parent_id = resolve_tid(parent) if parent else None
     blocked_by_id = resolve_tid(blocked_by) if blocked_by else None
     created_at = parse_created_at(created_at)
     by = resolve_by(by)
-    tid = die_on_tix_error(tixdb.add_ticket, type_, title, desc, status, priority, parent_id, project, team, assignee, model, tags, blocked_by_id, created_at, by)
+    tid = die_on_tix_error(tixdb.add_ticket, type_, title, desc, status, priority, parent_id, project, team, assignee, model, tags, blocked_by_id, created_at, by, blocked_on)
     t = tixdb.get_ticket(tid)
     click.echo(f"created {t['ticket_key'] or ('#' + str(tid))}")
     _model_nudge(t["model"])
@@ -282,19 +352,20 @@ def add(title, type_, desc, status, priority, parent, blocked_by, project, team,
 @click.option("--priority", default=None, type=click.Choice(tixdb.PRIORITIES))
 @click.option("--parent", default=None, help="parent ticket key or id")
 @click.option("--blocked-by", "blocked_by", default=None, help="ticket key or id")
+@click.option("--blocked-on", "blocked_on", default=None, help="person or ticket key the ticket waits on (case-insensitive), e.g. alice")
 @click.option("--project", default=None)
 @click.option("--team", default=None)
 @click.option("--assignee", default=None)
 @click.option("--model", default=None)
 @click.option("--tree", is_flag=True, help="nest children under their parent (indented). A child whose parent is filtered out of this listing shows at top level.")
-@click.option("--open", "open_", is_flag=True, help="only open tickets (everything but done). Shortcut for the common view; ignored if --status is given.")
-def list_cmd(status, type_, priority, parent, blocked_by, project, team, assignee, model, tree, open_):
+@click.option("--open", "open_", is_flag=True, help="only open tickets (everything but done and in_prod; on_staging counts as open, it is waiting for prod). Shortcut for the common view; ignored if --status is given.")
+def list_cmd(status, type_, priority, parent, blocked_by, blocked_on, project, team, assignee, model, tree, open_):
     """List tickets, optionally filtered."""
     parent_id = resolve_tid(parent) if parent else None
     blocked_by_id = resolve_tid(blocked_by) if blocked_by else None
-    rows = tixdb.list_tickets(status, type_, priority, parent_id, project, team, assignee, model, blocked_by_id)
+    rows = tixdb.list_tickets(status, type_, priority, parent_id, project, team, assignee, model, blocked_by_id, blocked_on)
     if open_ and not status:
-        rows = [t for t in rows if t["status"] != "done"]
+        rows = [t for t in rows if t["status"] not in tixdb.CLOSED_STATUSES]
     if not rows:
         click.echo("no tickets")
         return
@@ -353,6 +424,8 @@ def project_list():
         return
     for r in rows:
         folder = f" -> {r['folder']}" if r.get("folder") else ""
+        if r.get("folder") and not os.path.isdir(r["folder"]):
+            folder += "  (MISSING -- tix project set-folder)"
         click.echo(f"{r['key']:<4} {r['name']:<24} {r['ticket_count']} ticket(s){folder}")
 
 
@@ -364,6 +437,18 @@ def project_rename(identifier, new_name):
     changes — ticket ids like AG-6 stay valid everywhere they're already referenced."""
     row = die_on_tix_error(tixdb.rename_project, identifier, new_name)
     click.echo(f"renamed {row['key']} to '{row['name']}' — key unchanged, existing tickets updated")
+
+
+@project.command("set-folder")
+@click.argument("identifier")
+@click.argument("folder")
+@click.option("--no-create", is_flag=True, help="don't create the folder if it doesn't exist")
+def project_set_folder(identifier, folder, no_create):
+    """Point a project at a new folder (by key or name) -- for when its directory moved or
+    was renamed. Key and tickets are untouched. FOLDER must be an absolute path; it is
+    created if missing unless --no-create."""
+    row = die_on_tix_error(tixdb.set_project_folder, identifier, folder, not no_create)
+    click.echo(f"project {row['key']} ('{row['name']}') folder: {row['old_folder'] or '(none)'} -> {row['folder']}")
 
 
 @cli.command()
@@ -407,14 +492,26 @@ def show(tid):
     real_id = resolve_tid(tid)
     t = tixdb.get_ticket(real_id)
     for k, v in t.items():
+        if k in ("created_at", "updated_at"):
+            v = fmt_ts(v)
         click.echo(f"{k}: {v}")
     notes = tixdb.list_notes(real_id)
     if notes:
         click.echo("\nnotes:")
         for n in notes:
             who = f" ({n['author']})" if n["author"] else ""
-            click.echo(f"  [{n['created_at']}]{who} {n['text']}")
+            mark = _decision_tag(n) + " " if n.get("kind") == "decision" else ""
+            click.echo(f"  [{fmt_ts(n['created_at'])}]{who} {mark}{n['text']}")
     _model_nudge(t["model"])
+
+
+def _decision_tag(n):
+    bits = ["DECISION"]
+    if n.get("decided_by"):
+        bits.append(f"by {n['decided_by']}")
+    if n.get("channel"):
+        bits.append(f"via {n['channel']}")
+    return "[" + " ".join(bits) + "]"
 
 
 @cli.group()
@@ -423,12 +520,18 @@ def note():
     notes are the running history of what actually happened."""
 
 
-@note.command("add")
+# ignore_unknown_options: a note body that merely CONTAINS or STARTS with "--flag" text (quoted
+# CLI options, say) must be taken as the positional TEXT, not rejected as an unknown option
+# (TI-91). A lone mistyped option (one token, no whitespace) is still caught below.
+@note.command("add", context_settings={"ignore_unknown_options": True})
 @click.argument("tid")
 @click.argument("text")
 @click.option("--author", default=None, help="defaults to $TIX_AGENT if set")
 @click.option("--created-at", default=None, help="backdate the note's timestamp (ISO date or datetime, e.g. 2026-08-15) — for importing history, not normal use")
-def note_add(tid, text, author, created_at):
+@click.option("--decision", "decision", is_flag=True, help="record this note as a DECISION: the verbatim words someone decided with (needs --by). Listed by `tix decisions`.")
+@click.option("--by", "decided_by", default=None, help="with --decision: who decided (e.g. Alice)")
+@click.option("--channel", default=None, help="with --decision: where it was said, e.g. chat:12345 (channel:message-id)")
+def note_add(tid, text, author, created_at, decision, decided_by, channel):
     """Add a note. This is how you FINISH a ticket — a status flip alone tells the next
     reader nothing (). Before `tix update
     <KEY> --status done`, always `tix note add <KEY> "..."` covering, in order:
@@ -443,13 +546,52 @@ def note_add(tid, text, author, created_at):
     Write it for someone with none of your context — that's exactly who reads it,
     including you next week with the session gone. Say plainly if something failed,
     was skipped, or is unverified — a note that reads as success when the work was
-    partial is worse than no note, because it's trusted."""
+    partial is worse than no note, because it's trusted.
+
+    Shell-safe for long or code-heavy notes: pass TEXT as '-' and the note is read from
+    stdin. With a QUOTED heredoc delimiter the shell expands nothing, so backticks, $VARS,
+    $(...) and quotes arrive exactly as typed:
+
+    \b
+      tix note add TI-1 - <<'EOF'
+      Ran `git log`, cost $5, see "quoted" bits -- all stored verbatim.
+      EOF
+
+    (In double quotes the shell would run `git log` and expand $5 before tix saw them.)
+
+    Decisions (so they don't get buried in long notes and re-asked): add --decision with
+    --by and optionally --channel; TEXT is the decider's VERBATIM words.
+
+    \b
+      tix note add TI-1 "1 Same rule" --decision --by Alice --channel chat:4821
+
+    List them with `tix decisions`."""
+    if text == "-":
+        text = sys.stdin.read().rstrip("\n")
+    if text.startswith("-") and not any(c.isspace() for c in text):
+        click.echo(f"'{text}' looks like a mistyped option, not a note -- nothing added. "
+                    "A real note is a sentence; put the text in quotes.", err=True)
+        raise SystemExit(2)
+    if not text.strip():
+        click.echo("note text is empty -- nothing added", err=True)
+        raise SystemExit(1)
     real_id = resolve_tid(tid)
     author = resolve_by(author)
     if not author:
         click.echo("--author is required (or set $TIX_AGENT) -- a note with no author is unreadable history", err=True)
         raise SystemExit(1)
     created_at = parse_created_at(created_at)
+    if (decided_by or channel) and not decision:
+        click.echo("--by/--channel only apply with --decision -- nothing added", err=True)
+        raise SystemExit(1)
+    if decision and not (decided_by or "").strip():
+        click.echo("--decision needs --by NAME (who decided) -- nothing added", err=True)
+        raise SystemExit(1)
+    if decision:
+        die_on_tix_error(tixdb.add_note, real_id, text, author, created_at,
+                         "decision", decided_by.strip(), (channel or "").strip())
+        click.echo("decision added")
+        return
     die_on_tix_error(tixdb.add_note, real_id, text, author, created_at)
     click.echo("note added")
 
@@ -464,32 +606,64 @@ def note_list(tid):
         return
     for n in notes:
         who = f" ({n['author']})" if n["author"] else ""
-        click.echo(f"[{n['created_at']}]{who} {n['text']}")
+        mark = _decision_tag(n) + " " if n.get("kind") == "decision" else ""
+        click.echo(f"[{fmt_ts(n['created_at'])}]{who} {mark}{n['text']}")
+
+
+@cli.command()
+@click.option("--project", default=None, help="only decisions on tickets in this project (name or key)")
+@click.option("--search", default=None, help="case-insensitive substring match on the verbatim text")
+def decisions(project, search):
+    """List recorded decisions (notes added with `tix note add --decision`), newest first:
+    date, ticket, who decided, channel, and the verbatim words. Check here before asking
+    the owner something they may already have answered."""
+    rows = tixdb.list_decisions(project=project, search=search)
+    if not rows:
+        click.echo("no decisions")
+        return
+    for r in rows:
+        click.echo(f"[{fmt_ts(r['created_at'])}] {r['ticket_key']:<8} {r['decided_by'] or '-'} "
+                   f"({r['channel'] or '-'}): {r['text']}")
 
 
 @cli.command()
 @click.argument("tid")
 @click.option("--title", default=None)
-@click.option("--desc", default=None)
+@click.option("--desc", default=None, help="REPLACES the whole description (use --append-desc to add to it).")
+@click.option("--append-desc", "append_desc", default=None, help="append to the existing description (blank line between), instead of replacing it. Pass '-' to read the text from stdin.")
 @click.option("--status", default=None, type=click.Choice(tixdb.STATUSES))
 @click.option("--priority", default=None, type=click.Choice(tixdb.PRIORITIES))
 @click.option("--type", "type_", default=None, type=click.Choice(tixdb.TYPES))
 @click.option("--parent", default=None, help="parent ticket key or id")
 @click.option("--blocked-by", "blocked_by", default=None, help="ticket key or id this is stuck behind. Pass \"\" to clear.")
+@click.option("--blocked-on", "blocked_on", default=None, help="person (alice) or ticket key (NS-3) this waits on. Pass \"\" to clear.")
 @click.option("--project", default=None)
 @click.option("--team", default=None)
 @click.option("--assignee", default=None)
 @click.option("--model", default=None)
 @click.option("--tags", default=None)
+@click.option("--staging-sha", "staging_sha", default=None, help="commit id (7-40 hex) live on staging. Pass \"\" to clear.")
+@click.option("--prod-sha", "prod_sha", default=None, help="commit id (7-40 hex) live in production. Pass \"\" to clear.")
 @click.option("--by", default=None, help="who's making this change — defaults to $TIX_AGENT if set. Used to skip your own entries in your inbox, nothing else.")
-def update(tid, title, desc, status, priority, type_, parent, blocked_by, project, team, assignee, model, tags, by):
+def update(tid, title, desc, append_desc, status, priority, type_, parent, blocked_by, blocked_on, project, team, assignee, model, tags, staging_sha, prod_sha, by):
     """Update fields on a ticket (by ticket key or id)."""
     real_id = resolve_tid(tid)
     fields = {}
     if title is not None:
         fields["title"] = title
+    if desc is not None and append_desc is not None:
+        click.echo("--desc and --append-desc are mutually exclusive", err=True)
+        raise SystemExit(1)
     if desc is not None:
         fields["description"] = desc
+    if append_desc is not None:
+        if append_desc == "-":
+            append_desc = sys.stdin.read().rstrip("\n")
+        if not append_desc.strip():
+            click.echo("--append-desc text is empty -- nothing changed", err=True)
+            raise SystemExit(1)
+        current = tixdb.get_ticket(real_id).get("description") or ""
+        fields["description"] = f"{current}\n\n{append_desc}" if current else append_desc
     if status is not None:
         fields["status"] = status
     if priority is not None:
@@ -500,6 +674,8 @@ def update(tid, title, desc, status, priority, type_, parent, blocked_by, projec
         fields["parent_id"] = resolve_tid(parent)
     if blocked_by is not None:
         fields["blocked_by"] = resolve_tid(blocked_by) if blocked_by else None
+    if blocked_on is not None:
+        fields["blocked_on"] = blocked_on
     if project is not None:
         fields["project"] = project
     if team is not None:
@@ -510,6 +686,10 @@ def update(tid, title, desc, status, priority, type_, parent, blocked_by, projec
         fields["model"] = model
     if tags is not None:
         fields["tags"] = tags
+    if staging_sha is not None:
+        fields["staging_sha"] = staging_sha
+    if prod_sha is not None:
+        fields["prod_sha"] = prod_sha
     if not fields:
         click.echo("nothing to update", err=True)
         raise SystemExit(1)
@@ -517,6 +697,7 @@ def update(tid, title, desc, status, priority, type_, parent, blocked_by, projec
     click.echo(f"updated {t['ticket_key'] or ('#' + str(real_id))}")
     if fields.get("status") == "in_progress":
         _model_nudge(t["model"])
+
 
 
 @cli.command()
@@ -603,7 +784,7 @@ def activity(limit, project, team, status, type_, priority, assignee, model):
     for r in rows:
         tag = "created" if r["kind"] == "created" else "note"
         who = f" ({r['author']})" if r["author"] else ""
-        click.echo(f"[{r['ts']}] {r['ticket_key']:<8} {tag:<7}{who} {r['text']}")
+        click.echo(f"[{fmt_ts(r['ts'])}] {r['ticket_key']:<8} {tag:<7}{who} {r['text']}")
 
 
 @cli.command()
@@ -614,8 +795,10 @@ def inbox(assignee):
     "@ben check this"), all authored by someone else. Reading this marks it seen
     (doesn't delete anything; the ticket's own history is unaffected).
 
-    ASSIGNEE defaults to $TIX_AGENT if omitted. Any other tix command prints a one-line
-    nudge to stderr when your inbox is non-empty (set $TIX_AGENT for that to work)."""
+    ASSIGNEE defaults to $TIX_AGENT if omitted. Other tix commands print a one-line
+    nudge to stderr when your inbox is non-empty (set $TIX_AGENT for that to work) -- only on an
+    interactive terminal, and only when the count changed or 5 minutes passed. Piped/captured
+    output stays quiet; TIX_INBOX_NUDGE=1 forces it on every command, =0 turns it off."""
     who = assignee or os.environ.get("TIX_AGENT", "")
     if not who:
         click.echo("no assignee given and $TIX_AGENT is not set — tix inbox <assignee>", err=True)
@@ -627,15 +810,46 @@ def inbox(assignee):
         return
     for it in items:
         who_did = f" ({it['author']})" if it["author"] else ""
-        if it["kind"] == "event" and it["field"] == "created":
-            click.echo(f"[{it['ts']}] {it['ticket_key']:<8} created, assigned to you{who_did} — {it['title']}")
+        if it["kind"] == "event" and it["field"] == "created" and (it["ticket_assignee"] or "").lower() != who.strip().lower():
+            click.echo(f"[{fmt_ts(it['ts'])}] {it['ticket_key']:<8} new child of {it['parent_key']}{who_did} (watched) — {it['title']}")
+        elif it["kind"] == "event" and it["field"] == "created":
+            click.echo(f"[{fmt_ts(it['ts'])}] {it['ticket_key']:<8} created, assigned to you{who_did} — {it['title']}")
+        elif it["kind"] == "event" and it["field"] == "assignee" and (it["new_value"] or "").lower() == who.strip().lower():
+            click.echo(f"[{fmt_ts(it['ts'])}] {it['ticket_key']:<8} assigned to you{who_did} — {it['title']}")
         elif it["kind"] == "event":
-            click.echo(f"[{it['ts']}] {it['ticket_key']:<8} {it['field']} changed{who_did}: {it['old_value']} -> {it['new_value']}")
+            click.echo(f"[{fmt_ts(it['ts'])}] {it['ticket_key']:<8} {it['field']} changed{who_did}: {it['old_value']} -> {it['new_value']}")
         elif it.get("mentioned"):
-            click.echo(f"[{it['ts']}] {it['ticket_key']:<8} @mention{who_did}: {it['text']}")
+            click.echo(f"[{fmt_ts(it['ts'])}] {it['ticket_key']:<8} @mention{who_did}: {it['text']}")
         else:
-            click.echo(f"[{it['ts']}] {it['ticket_key']:<8} note{who_did}: {it['text']}")
+            click.echo(f"[{fmt_ts(it['ts'])}] {it['ticket_key']:<8} note{who_did}: {it['text']}")
     tixdb.mark_inbox_seen(who)
+
+
+@cli.command()
+@click.option("--parent", "parent", default=None, help="ticket (usually an epic) whose new children you want in your inbox")
+@click.option("--stop", is_flag=True, help="with --parent: stop watching it")
+@click.option("--as", "who", default=None, help="watcher name -- defaults to $TIX_AGENT")
+def watch(parent, stop, who):
+    """Watch an epic: new tickets created under it show up in `tix inbox` (and the
+    'N ticket(s) changed' nudge). With no --parent, lists what you are watching.
+    Children created since your last `tix inbox` are included on the first read."""
+    who = who or os.environ.get("TIX_AGENT", "")
+    if not who:
+        click.echo("no watcher given and $TIX_AGENT is not set -- tix watch --as <name>", err=True)
+        raise SystemExit(1)
+    if not parent:
+        rows = tixdb.list_watches(who)
+        if not rows:
+            click.echo("not watching anything")
+        for r in rows:
+            click.echo(f"{r['ticket_key']:<8} {r['title']}")
+        return
+    real_id = resolve_tid(parent)
+    if stop:
+        click.echo("unwatched" if tixdb.unwatch_ticket(who, real_id) else "was not watching that ticket")
+        return
+    tixdb.watch_ticket(who, real_id)
+    click.echo(f"watching {parent} -- new children will appear in tix inbox")
 
 
 # Generic "did real work happen" heuristics, in case no role-conf is given or

@@ -3,6 +3,50 @@
 All notable changes to tix are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2026-10-31
+
+Note: the version number jumps from 0.2.14 to 0.4.0. The `v0.3.0` tag already exists from the
+reverted Telefleet rename (see 0.2.3), so it is not reused.
+
+### Added
+- Release stages: two new statuses, `on_staging` (built, live on staging) and `in_prod`
+  (live in production), between `in_progress` and `done`; plus `staging_sha` / `prod_sha`
+  fields (`tix update KEY --staging-sha ... --prod-sha ...`, 7-40 hex chars, `""` clears).
+  `on_staging` still counts as open work; `in_prod` and `done` are closed. List output shows
+  `stg:`/`prod:` short shas, and the web UI shows the new statuses, the sha fields and an
+  on-staging card. Existing databases are migrated automatically on first run (the status
+  CHECK constraint is rebuilt); an older tix release cannot read rows in the new statuses.
+- `tix watch --parent KEY` (with `--stop`, `--as`): get new children of an epic in your
+  `tix inbox`; bare `tix watch` lists what you watch. The inbox also reports tickets newly
+  assigned to you.
+- Decision notes: `tix note add KEY TEXT --decision --by NAME [--channel CHANNEL]` records
+  someone's verbatim words as a decision, and the new `tix decisions` lists them newest
+  first (`--project`, `--search`) so they are checked before the same question is asked again.
+- `blocked_on` field: who or what a ticket waits on (a person or a ticket key), set with
+  `--blocked-on` on `add`/`update`, filterable with `tix list --blocked-on`, shown as `⏳name`.
+  Matching is case-insensitive; ticket keys are stored uppercase.
+- `tix update --append-desc TEXT` appends to the description instead of replacing it
+  (`-` reads stdin).
+- `tix note add KEY -` reads the note from stdin; the help shows a quoted-heredoc pattern so
+  backticks and `$VARS` in long notes arrive verbatim.
+- `tix project set-folder IDENTIFIER FOLDER` repoints a project whose directory moved, by key
+  or name; `tix project list` now flags a project whose folder does not exist.
+- Timestamps are displayed in the viewer's timezone (`$TIX_TZ`, then `$TZ`, else UTC). Storage
+  stays UTC and output stays ISO-8601 with an offset. The default is UTC, so output is
+  unchanged unless you set one of those variables.
+
+### Changed
+- The "N ticket(s) changed" inbox line no longer prints on every command: it is silent when
+  output is piped, and on a terminal it shows once per change or every 5 minutes. Set
+  `TIX_INBOX_NUDGE=1` to always show it, `0` to silence it.
+- Assignee names are matched case-insensitively and stored lowercase, so `Alice` and `alice`
+  are one person. Existing mixed-case assignees keep matching.
+
+### Fixed
+- A note whose text begins with a `--flag`-like word was rejected by the option parser; it is
+  now stored as text. A mistyped lone option or empty note text is a clear error, and no error
+  path writes a note.
+
 ## [0.2.14] - 2026-09-24
 
 ### Fixed

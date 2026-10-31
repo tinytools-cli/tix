@@ -21,6 +21,7 @@ class TicketIn(BaseModel):
     priority: str = "med"
     parent_id: Optional[str] = None
     blocked_by: Optional[str] = None
+    blocked_on: str = ""
     project: str  # required — every ticket needs one, see db.add_ticket
     team: str = ""
     assignee: str = ""
@@ -36,11 +37,14 @@ class TicketPatch(BaseModel):
     priority: Optional[str] = None
     parent_id: Optional[str] = None
     blocked_by: Optional[str] = None
+    blocked_on: Optional[str] = None
     project: Optional[str] = None
     team: Optional[str] = None
     assignee: Optional[str] = None
     model: Optional[str] = None
     tags: Optional[str] = None
+    staging_sha: Optional[str] = None
+    prod_sha: Optional[str] = None
 
 
 class ProjectIn(BaseModel):
@@ -63,13 +67,13 @@ def _resolve_or_404(tid: str) -> int:
 @app.get("/api/tickets")
 def api_list(status: Optional[str] = None, type: Optional[str] = None,
              priority: Optional[str] = None, parent_id: Optional[str] = None,
-             blocked_by: Optional[str] = None, project: Optional[str] = None, team: Optional[str] = None,
+             blocked_by: Optional[str] = None, blocked_on: Optional[str] = None, project: Optional[str] = None, team: Optional[str] = None,
              assignee: Optional[str] = None, model: Optional[str] = None, q: Optional[str] = None):
     if q:
         return tixdb.search_tickets(q)
     pid = _resolve_or_404(parent_id) if parent_id else None
     bid = _resolve_or_404(blocked_by) if blocked_by else None
-    return tixdb.list_tickets(status, type, priority, pid, project, team, assignee, model, bid)
+    return tixdb.list_tickets(status, type, priority, pid, project, team, assignee, model, bid, blocked_on)
 
 
 @app.post("/api/tickets")
@@ -78,7 +82,8 @@ def api_add(t: TicketIn):
     bid = _resolve_or_404(t.blocked_by) if t.blocked_by else None
     try:
         tid = tixdb.add_ticket(t.type, t.title, t.description, t.status, t.priority, pid,
-                                t.project, t.team, t.assignee, t.model, t.tags, bid)
+                                t.project, t.team, t.assignee, t.model, t.tags, bid,
+                                blocked_on=t.blocked_on)
     except tixdb.TixError as e:
         raise HTTPException(400, str(e))
     return tixdb.get_ticket(tid)
@@ -195,14 +200,14 @@ static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+@app.get("/")
+def index():
+    return FileResponse(static_dir / "index.html")
+
+
 def main():
     """Entry point for the `tix-web` console script -- `uvicorn web:app` works too,
     this just saves remembering the module:app spelling."""
     import os
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("TIX_WEB_PORT", "8791")))
-
-
-@app.get("/")
-def index():
-    return FileResponse(static_dir / "index.html")

@@ -12,7 +12,12 @@ _default_dir.mkdir(parents=True, exist_ok=True)
 DB_PATH = Path(os.environ.get("TIX_DB_PATH") or (_default_dir / "tix.db"))
 
 TYPES = ("epic", "story", "task", "bug", "support")
-STATUSES = ("todo", "in_progress", "blocked", "done")
+# Release stages (TI-98): in_progress -> on_staging (built, live on staging) -> in_prod (live in
+# production). `done` stays the general "finished" state for work that doesn't ship.
+STATUSES = ("todo", "in_progress", "blocked", "on_staging", "in_prod", "done")
+# Statuses that are no longer "open work": `list --open`, the web "unresolved" filter and the
+# dashboard open counts exclude these. on_staging IS still open -- it is waiting for prod.
+CLOSED_STATUSES = ("in_prod", "done")
 PRIORITIES = ("low", "med", "high", "urgent")
 # Seeded into the teams table on first migration — a starting point, not a hard limit.
 DEFAULT_TEAMS = ("Engineering", "Sales", "Marketing", "Support", "Ops")
@@ -24,15 +29,18 @@ CREATE TABLE IF NOT EXISTS tickets (
     type TEXT NOT NULL CHECK(type IN ('epic','story','task','bug','support')),
     title TEXT NOT NULL,
     description TEXT DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','blocked','done')),
+    status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','blocked','on_staging','in_prod','done')),
     priority TEXT NOT NULL DEFAULT 'med' CHECK(priority IN ('low','med','high','urgent')),
     parent_id INTEGER REFERENCES tickets(id),
     blocked_by INTEGER REFERENCES tickets(id),
+    blocked_on TEXT DEFAULT '',
     project TEXT DEFAULT '',
     team TEXT DEFAULT '',
     assignee TEXT DEFAULT '',
     model TEXT DEFAULT '',
     tags TEXT DEFAULT '',
+    staging_sha TEXT DEFAULT '',
+    prod_sha TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -55,7 +63,10 @@ CREATE TABLE IF NOT EXISTS notes (
     ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
     author TEXT DEFAULT '',
     text TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'note',
+    decided_by TEXT DEFAULT '',
+    channel TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_notes_ticket ON notes(ticket_id);
 CREATE TABLE IF NOT EXISTS ticket_events (
@@ -73,6 +84,11 @@ CREATE TABLE IF NOT EXISTS inbox_watermarks (
     last_event_id INTEGER NOT NULL DEFAULT 0,
     last_note_id INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS watches (
+    watcher TEXT NOT NULL COLLATE NOCASE,
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    PRIMARY KEY (watcher, ticket_id)
+);
 """
 
 
@@ -82,6 +98,30 @@ class TixError(ValueError):
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def norm_assignee(name):
+    """Assignees are stored lowercase + trimmed and matched case-insensitively, so
+    'Alice' and 'alice' are one person (TI-76)."""
+    return (name or "").strip().lower()
+
+
+def norm_blocked_on(value):
+    """TI-101: who/what a ticket waits on. A ticket key (NS-3) is stored UPPERCASE; anything
+    else is a person, stored lowercase like assignees. '' clears. Separate from blocked_by
+    (the ticket FK)."""
+    v = (value or "").strip()
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*-\d+", v):
+        return v.upper()
+    return v.lower()
+
+
+def norm_sha(value, label="sha"):
+    """Commit ids are stored lowercase; 7-40 hex chars (abbreviated or full). '' clears."""
+    v = (value or "").strip().lower()
+    if v and not re.fullmatch(r"[0-9a-f]{7,40}", v):
+        raise TixError(f"{label} must be a git commit id (7-40 hex characters), got '{value}'")
+    return v
 
 
 def get_conn():
@@ -105,6 +145,39 @@ def _migrate_widen_type_check(conn):
     conn.execute("DROP TABLE tickets")
     conn.execute("ALTER TABLE tickets_new RENAME TO tickets")
     conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_release_stages(conn):
+    """TI-98: widen the status CHECK to allow on_staging/in_prod and add staging_sha/prod_sha.
+    SQLite can't ALTER a CHECK, so (like the type-check migration) rebuild tickets: new table
+    from the current SCHEMA, copy every column both have, swap, recreate indexes. Idempotent --
+    skipped once the stored table definition already mentions on_staging. Runs in one
+    transaction (BEGIN IMMEDIATE) so a crash leaves the old table intact."""
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").fetchone()
+    if not sql or "on_staging" in sql["sql"]:
+        return
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        create_new = SCHEMA.split(";")[0].replace("CREATE TABLE IF NOT EXISTS tickets", "CREATE TABLE tickets_new")
+        conn.execute("DROP TABLE IF EXISTS tickets_new")
+        conn.execute(create_new)
+        old_cols = [row["name"] for row in conn.execute("PRAGMA table_info(tickets)")]
+        new_cols = {row["name"] for row in conn.execute("PRAGMA table_info(tickets_new)")}
+        common = ", ".join(c for c in old_cols if c in new_cols)
+        conn.execute(f"INSERT INTO tickets_new ({common}) SELECT {common} FROM tickets")
+        conn.execute("DROP TABLE tickets")
+        conn.execute("ALTER TABLE tickets_new RENAME TO tickets")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_type ON tickets(type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_id)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _derive_key(name, taken):
@@ -173,6 +246,21 @@ def init_db():
         conn.execute("ALTER TABLE tickets ADD COLUMN model TEXT DEFAULT ''")
     if "blocked_by" not in cols:
         conn.execute("ALTER TABLE tickets ADD COLUMN blocked_by INTEGER REFERENCES tickets(id)")
+    _migrate_release_stages(conn)
+    # TI-101: blocked_on (person or ticket key). Checked AFTER the rebuild migrations above so
+    # it survives them (SCHEMA also carries it for fresh/rebuilt tables); idempotent.
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(tickets)")}
+    if "blocked_on" not in cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN blocked_on TEXT DEFAULT ''")
+    # TI-100: decision notes. Plain ADD COLUMN (existing rows get kind='note'); idempotent.
+    note_cols = {row["name"] for row in conn.execute("PRAGMA table_info(notes)")}
+    if "kind" not in note_cols:
+        conn.execute("ALTER TABLE notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'note'")
+    if "decided_by" not in note_cols:
+        conn.execute("ALTER TABLE notes ADD COLUMN decided_by TEXT DEFAULT ''")
+    if "channel" not in note_cols:
+        conn.execute("ALTER TABLE notes ADD COLUMN channel TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_kind ON notes(kind)")
     proj_cols = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
     if "folder" not in proj_cols:
         conn.execute("ALTER TABLE projects ADD COLUMN folder TEXT DEFAULT ''")
@@ -186,6 +274,7 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_team ON tickets(team)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_blocked_by ON tickets(blocked_by)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_blocked_on ON tickets(blocked_on)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ticket_key ON tickets(ticket_key) WHERE ticket_key IS NOT NULL")
     _backfill_registries_and_keys(conn)
     conn.commit()
@@ -206,10 +295,10 @@ def resolve_team(conn, identifier):
 def add_project(name, folder="", key=None):
     """Register a project, or fix up an existing one's folder.
 
-    TI-88: re-running this on an existing name used to silently ignore a
-    changed --folder and return the stale row -- the CLI still printed
-    "registered project ..." as if it had taken effect. `add` is now the
-    same command you use to fix a moved folder, and always says which of
+    TI-88: re-running this on an existing name used to
+    silently ignore a changed --folder and return the stale row -- CLI still
+    printed "registered project ..." as if it had taken effect. `add` is now
+    the same command you use to fix a moved folder, and always says which of
     the three things actually happened (created / updated / unchanged) via
     result["_state"], rather than reporting "registered" regardless."""
     if not folder:
@@ -289,6 +378,29 @@ def rename_project(identifier, new_name):
     return {"key": proj["key"], "name": new_name}
 
 
+def set_project_folder(identifier, folder, create=True):
+    """Point an existing project at a new folder (TI-90). Looks the project up by key or
+    name, so unlike `project add` you don't have to re-type its full name. Key and
+    tickets are untouched. Creates the folder unless create=False."""
+    if not folder or not os.path.isabs(folder):
+        raise TixError(f"folder must be an absolute path, got '{folder}'")
+    conn = get_conn()
+    proj = resolve_project(conn, identifier)
+    if not proj:
+        conn.close()
+        raise TixError(f"no such project '{identifier}'")
+    if create:
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            conn.close()
+            raise TixError(f"couldn't create folder '{folder}': {e}")
+    conn.execute("UPDATE projects SET folder = ? WHERE key = ?", (folder, proj["key"]))
+    conn.commit()
+    conn.close()
+    return {"key": proj["key"], "name": proj["name"], "old_folder": proj["folder"], "folder": folder}
+
+
 def list_projects_registry():
     conn = get_conn()
     rows = conn.execute(
@@ -335,7 +447,7 @@ def resolve_ticket_id(identifier):
 
 
 def add_ticket(type_, title, description="", status="todo", priority="med", parent_id=None,
-               project="", team="", assignee="", model="", tags="", blocked_by=None, created_at=None, by=""):
+               project="", team="", assignee="", model="", tags="", blocked_by=None, created_at=None, by="", blocked_on=""):
     if not project:
         raise TixError(
             "project is required. Pick an existing one (tix project list) or register a "
@@ -346,6 +458,8 @@ def add_ticket(type_, title, description="", status="todo", priority="med", pare
             "model is required — which model is doing this work? (haiku/sonnet/opus, or the "
             "full model id). Pick it up front and use that model for the task."
         )
+    assignee = norm_assignee(assignee)
+    blocked_on = norm_blocked_on(blocked_on)
     conn = get_conn()
     ticket_key = None
     if project:
@@ -364,12 +478,12 @@ def add_ticket(type_, title, description="", status="todo", priority="med", pare
         team = te["name"]
     ts = created_at or now()
     cur = conn.execute(
-        "INSERT INTO tickets (ticket_key, type, title, description, status, priority, parent_id, blocked_by, project, team, assignee, model, tags, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (ticket_key, type_, title, description, status, priority, parent_id, blocked_by, project, team, assignee, model, tags, ts, ts),
+        "INSERT INTO tickets (ticket_key, type, title, description, status, priority, parent_id, blocked_by, blocked_on, project, team, assignee, model, tags, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (ticket_key, type_, title, description, status, priority, parent_id, blocked_by, blocked_on, project, team, assignee, model, tags, ts, ts),
     )
     tid = cur.lastrowid
-    if assignee:
+    if assignee or parent_id:  # parent_id: so watchers of the parent (TI-99) see new children
         conn.execute(
             "INSERT INTO ticket_events (ticket_id, field, old_value, new_value, author, created_at) "
             "VALUES (?, 'created', NULL, ?, ?, ?)",
@@ -380,7 +494,7 @@ def add_ticket(type_, title, description="", status="todo", priority="med", pare
     return tid
 
 
-def list_tickets(status=None, type_=None, priority=None, parent_id=None, project=None, team=None, assignee=None, model=None, blocked_by=None):
+def list_tickets(status=None, type_=None, priority=None, parent_id=None, project=None, team=None, assignee=None, model=None, blocked_by=None, blocked_on=None):
     conn = get_conn()
     q = ("SELECT t.*, p.ticket_key AS parent_key, b.ticket_key AS blocked_by_key FROM tickets t "
          "LEFT JOIN tickets p ON p.id = t.parent_id "
@@ -407,14 +521,17 @@ def list_tickets(status=None, type_=None, priority=None, parent_id=None, project
         q += " AND t.team = ?"
         params.append(te["name"] if te else team)
     if assignee:
-        q += " AND t.assignee = ?"
-        params.append(assignee)
+        q += " AND LOWER(t.assignee) = ?"
+        params.append(norm_assignee(assignee))
     if model:
         q += " AND t.model = ?"
         params.append(model)
     if blocked_by is not None:
         q += " AND t.blocked_by = ?"
         params.append(blocked_by)
+    if blocked_on:
+        q += " AND LOWER(t.blocked_on) = LOWER(?)"
+        params.append(norm_blocked_on(blocked_on))
     q += " ORDER BY t.priority DESC, t.id ASC"
     rows = conn.execute(q, params).fetchall()
     conn.close()
@@ -436,6 +553,10 @@ def get_ticket(tid):
 def update_ticket(tid, by="", **fields):
     if not fields:
         return get_ticket(tid)
+    if "assignee" in fields:
+        fields["assignee"] = norm_assignee(fields["assignee"])
+    if "blocked_on" in fields:
+        fields["blocked_on"] = norm_blocked_on(fields["blocked_on"])
     conn = get_conn()
     # project/model are required-going-forward fields, but plenty of tickets predate them
     # and already sit at ''. Only block an actual CLEAR (had a value, now doesn't) — an
@@ -451,6 +572,9 @@ def update_ticket(tid, by="", **fields):
     if not fields:
         conn.close()
         return get_ticket(tid)
+    for sha_field in ("staging_sha", "prod_sha"):
+        if sha_field in fields:
+            fields[sha_field] = norm_sha(fields[sha_field], sha_field)
     if fields.get("project"):
         proj = resolve_project(conn, fields["project"])
         if not proj:
@@ -509,7 +633,7 @@ def search_tickets(text):
     return [dict(r) for r in rows]
 
 
-def add_note(ticket_id, text, author="", created_at=None):
+def add_note(ticket_id, text, author="", created_at=None, kind="note", decided_by="", channel=""):
     conn = get_conn()
     exists = conn.execute("SELECT 1 FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     if not exists:
@@ -517,8 +641,9 @@ def add_note(ticket_id, text, author="", created_at=None):
         raise TixError(f"no such ticket 'id={ticket_id}'")
     ts = created_at or now()
     cur = conn.execute(
-        "INSERT INTO notes (ticket_id, author, text, created_at) VALUES (?, ?, ?, ?)",
-        (ticket_id, author, text, ts),
+        "INSERT INTO notes (ticket_id, author, text, created_at, kind, decided_by, channel) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (ticket_id, author, text, ts, kind, decided_by, channel),
     )
     conn.execute("UPDATE tickets SET updated_at = ? WHERE id = ?", (now(), ticket_id))
     conn.commit()
@@ -534,6 +659,27 @@ def list_notes(ticket_id):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def list_decisions(project=None, search=None):
+    """TI-100: decision notes (kind='decision'), newest first. project filters on the ticket's
+    project (name or key); search is a case-insensitive substring match on the verbatim text."""
+    conn = get_conn()
+    q = ("SELECT n.id, n.created_at, n.author, n.text, n.decided_by, n.channel, "
+         "t.ticket_key, t.title, t.project FROM notes n JOIN tickets t ON t.id = n.ticket_id "
+         "WHERE n.kind = 'decision'")
+    params = []
+    if project:
+        proj = resolve_project(conn, project)
+        q += " AND t.project = ?"
+        params.append(proj["name"] if proj else project)
+    q += " ORDER BY n.created_at DESC, n.id DESC"
+    rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+    conn.close()
+    if search:
+        needle = search.casefold()
+        rows = [r for r in rows if needle in r["text"].casefold()]
+    return rows
 
 
 def recent_activity(limit=20, project=None, team=None, status=None, type_=None, priority=None, assignee=None, model=None):
@@ -561,8 +707,8 @@ def recent_activity(limit=20, project=None, team=None, status=None, type_=None, 
         ticket_filter += " AND t.priority = ?"
         params.append(priority)
     if assignee:
-        ticket_filter += " AND t.assignee = ?"
-        params.append(assignee)
+        ticket_filter += " AND LOWER(t.assignee) = ?"
+        params.append(norm_assignee(assignee))
     if model:
         ticket_filter += " AND t.model = ?"
         params.append(model)
@@ -608,16 +754,18 @@ def get_inbox(assignee):
     last_event_id, last_note_id = _watermark(conn, assignee)
     rows = conn.execute(
         "SELECT 'event' AS kind, e.id AS row_id, e.created_at AS ts, e.author, t.ticket_key, t.title, "
-        "e.field, e.old_value, e.new_value, NULL AS text, t.assignee AS ticket_assignee "
+        "e.field, e.old_value, e.new_value, NULL AS text, t.assignee AS ticket_assignee, "
+        "(SELECT p.ticket_key FROM tickets p WHERE p.id = t.parent_id) AS parent_key "
         "FROM ticket_events e JOIN tickets t ON t.id = e.ticket_id "
-        "WHERE t.assignee = ? COLLATE NOCASE AND e.id > ? "
+        "WHERE (t.assignee = ? COLLATE NOCASE OR (e.field = 'created' AND t.parent_id IN "
+        "(SELECT w.ticket_id FROM watches w WHERE w.watcher = ?))) AND e.id > ? "
         "UNION ALL "
         "SELECT 'note' AS kind, n.id AS row_id, n.created_at AS ts, n.author, t.ticket_key, t.title, "
-        "NULL AS field, NULL AS old_value, NULL AS new_value, n.text, t.assignee AS ticket_assignee "
+        "NULL AS field, NULL AS old_value, NULL AS new_value, n.text, t.assignee AS ticket_assignee, NULL AS parent_key "
         "FROM notes n JOIN tickets t ON t.id = n.ticket_id "
         "WHERE n.id > ? "
         "ORDER BY ts ASC",
-        (assignee, last_event_id, last_note_id),
+        (assignee, assignee, last_event_id, last_note_id),
     ).fetchall()
     conn.close()
     result = []
@@ -635,6 +783,35 @@ def get_inbox(assignee):
         d["mentioned"] = mentioned and not own_ticket
         result.append(d)
     return result
+
+
+def watch_ticket(watcher, tid):
+    """Subscribe `watcher` to new children of ticket `tid` (they show up in their inbox)."""
+    watcher = norm_assignee(watcher)
+    conn = get_conn()
+    if not conn.execute("SELECT 1 FROM tickets WHERE id = ?", (tid,)).fetchone():
+        conn.close()
+        raise TixError(f"no such ticket 'id={tid}'")
+    conn.execute("INSERT OR IGNORE INTO watches (watcher, ticket_id) VALUES (?, ?)", (watcher, tid))
+    conn.commit()
+    conn.close()
+
+
+def unwatch_ticket(watcher, tid):
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM watches WHERE watcher = ? AND ticket_id = ?", (norm_assignee(watcher), tid))
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def list_watches(watcher):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT t.ticket_key, t.title FROM watches w JOIN tickets t ON t.id = w.ticket_id "
+        "WHERE w.watcher = ? ORDER BY t.id", (norm_assignee(watcher),)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def count_inbox(assignee):
@@ -667,19 +844,20 @@ def dashboard_stats():
     status_counts = {r["status"]: r["n"] for r in conn.execute(
         "SELECT status, COUNT(*) AS n FROM tickets GROUP BY status")}
     total = sum(status_counts.values())
-    open_count = status_counts.get("todo", 0) + status_counts.get("in_progress", 0) + status_counts.get("blocked", 0)
+    open_count = sum(n for st, n in status_counts.items() if st not in CLOSED_STATUSES)
     done_count = status_counts.get("done", 0)
     blocked_count = status_counts.get("blocked", 0)
+    staging_count = status_counts.get("on_staging", 0)
 
     by_project = [dict(r) for r in conn.execute(
         "SELECT COALESCE(NULLIF(project, ''), '(none)') AS project, COUNT(*) AS n "
-        "FROM tickets WHERE status != 'done' GROUP BY project ORDER BY n DESC, project ASC"
+        "FROM tickets WHERE status NOT IN ('in_prod','done') GROUP BY project ORDER BY n DESC, project ASC"
     )]
 
     leaderboard = [dict(r) for r in conn.execute(
         "SELECT assignee, "
-        "SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open_all, "
-        "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_all "
+        "SUM(CASE WHEN status NOT IN ('in_prod','done') THEN 1 ELSE 0 END) AS open_all, "
+        "SUM(CASE WHEN status IN ('in_prod','done') THEN 1 ELSE 0 END) AS done_all "
         "FROM tickets WHERE assignee != '' "
         "GROUP BY assignee COLLATE NOCASE ORDER BY done_all DESC, assignee ASC"
     )]
@@ -691,6 +869,6 @@ def dashboard_stats():
 
     conn.close()
     return {
-        "total": total, "open": open_count, "done": done_count, "blocked": blocked_count,
+        "total": total, "open": open_count, "done": done_count, "blocked": blocked_count, "on_staging": staging_count,
         "by_project": by_project, "leaderboard": leaderboard, "by_model": by_model,
     }

@@ -28,6 +28,8 @@
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
   .status-todo { background: #ffffff1a; color: var(--muted); }
   .status-in_progress { background: #5b8cff2a; color: var(--accent); }
+  .status-on_staging { background: #f5b94a2a; color: #f5b94a; }
+  .status-in_prod { background: #b58cff2a; color: #b58cff; }
   .status-blocked { background: #ff6b6b2a; color: var(--red); }
   .status-done { background: #4fd18b2a; color: var(--green); }
   .prio-urgent { color: var(--red); font-weight: 600; }
@@ -104,6 +106,7 @@
     <div class="stat-card" id="card-total" data-status=""><div class="n" id="s-total">–</div><div class="label">total</div></div>
     <div class="stat-card" id="card-open" data-status="unresolved"><div class="n" id="s-open">–</div><div class="label">open</div></div>
     <div class="stat-card" id="card-done" data-status="done"><div class="n" id="s-done">–</div><div class="label">done</div></div>
+    <div class="stat-card" id="card-staging" data-status="on_staging"><div class="n" id="s-staging">–</div><div class="label">on staging</div></div>
     <div class="stat-card blocked" id="card-blocked" data-status="blocked"><div class="n" id="s-blocked">–</div><div class="label">blocked</div></div>
   </div>
   <div class="stat-panels">
@@ -176,7 +179,10 @@
     </div>
     <div class="row">
       <div class="field"><label>parent (epic key or id)</label><input id="m-parent" placeholder="e.g. NS-1" /></div>
+      <div class="field"><label>staging commit (sha)</label><input id="m-staging-sha" placeholder="e.g. a1b2c3d" /></div>
+      <div class="field"><label>prod commit (sha)</label><input id="m-prod-sha" placeholder="e.g. a1b2c3d" /></div>
       <div class="field"><label>blocked by (ticket key or id)</label><input id="m-blocked-by" placeholder="e.g. NS-3" /></div>
+      <div class="field"><label>blocked on (person or ticket key)</label><input id="m-blocked-on" placeholder="e.g. alice" /></div>
     </div>
     <div class="field"><label>tags</label><input id="m-tags" placeholder="comma,separated" /></div>
     <div class="field" style="position:relative;">
@@ -305,7 +311,7 @@ async function refresh() {
   const unresolved = status === 'unresolved';
   if (unresolved) params.delete('status');
   let rows = await api('/api/tickets?' + params.toString());
-  if (unresolved) rows = rows.filter(t => t.status !== 'done');
+  if (unresolved) rows = rows.filter(t => t.status !== 'done' && t.status !== 'in_prod');
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
@@ -342,7 +348,7 @@ async function refresh() {
       <td>${escapeHtml(t.project || '')}</td>
       <td>${escapeHtml(t.team || '')}</td>
       <td>${t.type}</td>
-      <td style="padding-left: ${16 + depth * 22}px">${indent}${caret}${escapeHtml(t.title)}${(t.parent_id && !depth) ? ` <span class="tag">^${escapeHtml(t.parent_key || t.parent_id)}</span>` : ''}${t.blocked_by ? ` <span class="tag blocked-marker">⛔${escapeHtml(t.blocked_by_key || t.blocked_by)}</span>` : ''}${t.tags ? ` <span class="tag">[${escapeHtml(t.tags)}]</span>` : ''}</td>
+      <td style="padding-left: ${16 + depth * 22}px">${indent}${caret}${escapeHtml(t.title)}${(t.parent_id && !depth) ? ` <span class="tag">^${escapeHtml(t.parent_key || t.parent_id)}</span>` : ''}${t.blocked_by ? ` <span class="tag blocked-marker">⛔${escapeHtml(t.blocked_by_key || t.blocked_by)}</span>` : ''}${t.blocked_on ? ` <span class="tag blocked-marker">⏳${escapeHtml(t.blocked_on)}</span>` : ''}${t.tags ? ` <span class="tag">[${escapeHtml(t.tags)}]</span>` : ''}</td>
       <td><span class="badge status-${t.status}">${t.status}</span></td>
       <td class="prio-${t.priority}">${t.priority}</td>
       <td class="tag">${escapeHtml(t.assignee || '')}</td>
@@ -371,6 +377,7 @@ async function loadStats() {
   document.getElementById('s-open').textContent = s.open;
   document.getElementById('s-done').textContent = s.done;
   document.getElementById('s-blocked').textContent = s.blocked;
+  document.getElementById('s-staging').textContent = s.on_staging;
   renderStatRows('s-by-project', s.by_project, r => r.project, r => r.n, false);
   renderStatRows('s-leaderboard', s.leaderboard, r => r.assignee, r => `${r.open_all} / ${r.done_all}`, true);
   renderStatRows('s-by-model', s.by_model, r => r.model, r => r.n, false);
@@ -424,7 +431,10 @@ function openModal(t) {
   document.getElementById('m-assignee').value = t ? (t.assignee || '') : '';
   document.getElementById('m-parent').value = t && t.parent_id ? (t.parent_key || t.parent_id) : '';
   document.getElementById('m-blocked-by').value = t && t.blocked_by ? (t.blocked_by_key || t.blocked_by) : '';
+  document.getElementById('m-blocked-on').value = t ? (t.blocked_on || '') : '';
   document.getElementById('m-tags').value = t ? (t.tags || '') : '';
+  document.getElementById('m-staging-sha').value = t ? (t.staging_sha || '') : '';
+  document.getElementById('m-prod-sha').value = t ? (t.prod_sha || '') : '';
   document.getElementById('m-desc').value = t ? (t.description || '') : '';
   document.getElementById('delete-btn').style.display = t ? 'inline-block' : 'none';
   document.getElementById('notes-section').style.display = t ? 'block' : 'none';
@@ -667,7 +677,10 @@ async function save() {
     model,
     parent_id: document.getElementById('m-parent').value.trim() || null,
     blocked_by: document.getElementById('m-blocked-by').value.trim() || null,
+    blocked_on: document.getElementById('m-blocked-on').value.trim(),
     tags: document.getElementById('m-tags').value.trim(),
+    staging_sha: document.getElementById('m-staging-sha').value.trim(),
+    prod_sha: document.getElementById('m-prod-sha').value.trim(),
     description: document.getElementById('m-desc').value,
   };
   await trySave(payload);

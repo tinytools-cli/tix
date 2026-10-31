@@ -13,10 +13,11 @@ Add a new ticket.
 |---|---|
 | `--type [epic\|story\|task\|bug\|support]` | epic = weeks-to-a-month of work. story/task/bug/support = hours to a couple of days. |
 | `--desc TEXT` | |
-| `--status [todo\|in_progress\|blocked\|done]` | |
+| `--status [todo\|in_progress\|blocked\|on_staging\|in_prod\|done]` | `on_staging` = built and live on staging, `in_prod` = live in production; `done` is for work that doesn't ship. |
 | `--priority [low\|med\|high\|urgent]` | |
 | `--parent TEXT` | parent ticket key or id (must be an epic) |
 | `--blocked-by TEXT` | ticket key or id this is stuck behind — a reference only, not enforced |
+| `--blocked-on TEXT` | person or ticket key this waits on (stored case-insensitively; shown as `⏳name` in `list`) |
 | `--project TEXT` | **required** — project name or key, must already be registered (`tix project add`) |
 | `--team TEXT` | team name — must already be registered (`tix team add`) |
 | `--assignee TEXT` | |
@@ -30,7 +31,8 @@ Add a new ticket.
 List tickets, optionally filtered.
 
 Flags: `--status`, `--type`, `--priority`, `--parent`, `--blocked-by`, `--project`, `--team`,
-`--assignee`, `--model` — same choices as `add`, all optional, combine as an AND filter.
+`--assignee`, `--model`, `--blocked-on` — same choices as `add`, all optional, combine as an AND filter.
+Assignee matching is case-insensitive.
 
 ## `tix show TID`
 
@@ -46,6 +48,9 @@ Same flags as `add` (`--title`, `--desc`, `--status`, `--priority`, `--type`, `-
 | Flag | Notes |
 |---|---|
 | `--blocked-by TEXT` | ticket key or id this is stuck behind. Pass `""` to clear. |
+| `--blocked-on TEXT` | person or ticket key this waits on. Pass `""` to clear. |
+| `--append-desc TEXT` | append to the description (blank line between) instead of replacing it; `-` reads stdin. |
+| `--staging-sha TEXT` / `--prod-sha TEXT` | commit id (7-40 hex) live on staging / in production. Pass `""` to clear. |
 
 ## `tix rm TID`
 
@@ -96,6 +101,21 @@ because it's trusted.
 | `--author TEXT` | defaults to `$TIX_AGENT` if set |
 | `--created-at TEXT` | backdate the note's timestamp (ISO date or datetime, e.g. `2026-08-15`) — for importing history, not normal use |
 
+### Decisions
+
+`tix note add TID TEXT --decision --by NAME [--channel CHANNEL]` records TEXT (the decider's verbatim
+words) as a decision note, shown as `[DECISION by NAME via CHANNEL] ...`. Pass `-` as TEXT to read
+the note from stdin (safe for backticks, `$VARS` and quotes when the heredoc delimiter is quoted).
+
+## `tix decisions`
+
+List recorded decisions, newest first. Flags: `--project`, `--search` (case-insensitive substring).
+
+## `tix watch`
+
+`tix watch --parent KEY` — tickets created under that epic show up in your `tix inbox`. With no
+`--parent`, lists what you watch. `--stop` ends a watch; `--as NAME` (default `$TIX_AGENT`).
+
 ## `tix note list TID`
 
 List notes on a ticket.
@@ -110,6 +130,11 @@ List notes on a ticket.
 ## `tix project list` / `tix projects`
 
 List registered projects. `tix projects` is a shortcut for `tix project list`.
+
+## `tix project set-folder IDENTIFIER FOLDER`
+
+Point a project at a new absolute folder path (created unless `--no-create`). `tix project list` flags
+projects whose folder is missing.
 
 ## `tix project rename IDENTIFIER NEW_NAME`
 
